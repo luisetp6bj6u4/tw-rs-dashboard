@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台股 RS 動能與族群輪動</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232a78d6'/%3E%3Cpath d='M7 22 L13 15 L18 19 L25 9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    color-scheme: light;
+    --surface-0: #f4f3f0;
+    --surface-1: #fcfcfb;
+    --surface-2: #eceae5;
+    --line: #dedbd4;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #77756e;
+    --series-1: #2a78d6;
+    --series-2: #eb6834;
+    --series-3: #1baf7a;
+    --dot: #6b7b8c;
+    --up: #c0392b;      /* 台股習慣：紅漲綠跌 */
+    --down: #0ca30c;
+    --q-lead: rgba(27,175,122,.10);
+    --q-improve: rgba(42,120,214,.09);
+    --q-weaken: rgba(235,104,52,.09);
+    --q-lag: rgba(120,118,110,.09);
+  }
+  :root[data-theme="dark"], :root:not([data-theme="light"]) {
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-0: #111110;
+      --surface-1: #1a1a19;
+      --surface-2: #232321;
+      --line: #35342f;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #94938a;
+      --series-1: #3987e5;
+      --series-2: #d95926;
+      --series-3: #199e70;
+      --dot: #8e9aa8;
+      --up: #e66767;
+      --down: #3fb24a;
+      --q-lead: rgba(25,158,112,.16);
+      --q-improve: rgba(57,135,229,.14);
+      --q-weaken: rgba(217,89,38,.14);
+      --q-lag: rgba(148,147,138,.12);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-0: #111110; --surface-1: #1a1a19; --surface-2: #232321; --line: #35342f;
+    --text-primary: #ffffff; --text-secondary: #c3c2b7; --text-muted: #94938a;
+    --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --dot: #8e9aa8;
+    --up: #e66767; --down: #3fb24a;
+    --q-lead: rgba(25,158,112,.16); --q-improve: rgba(57,135,229,.14);
+    --q-weaken: rgba(217,89,38,.14); --q-lag: rgba(148,147,138,.12);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface-0); color: var(--text-primary);
+    font: 15px/1.6 "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 64px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 20px; margin: 0; letter-spacing: .01em; }
+  h2 { font-size: 16px; margin: 28px 0 10px; }
+  .sub { color: var(--text-secondary); font-size: 13px; }
+  button, select, input { font: inherit; color: inherit; }
+  .ghost {
+    background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px;
+    padding: 5px 10px; cursor: pointer;
+  }
+  .ghost:hover { background: var(--surface-2); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 10px; margin: 16px 0 4px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .tile .k { color: var(--text-muted); font-size: 12px; }
+  .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+  nav.tabs { display: flex; gap: 6px; margin: 18px 0 12px; flex-wrap: wrap; }
+  nav.tabs button {
+    background: none; border: 1px solid transparent; border-radius: 999px;
+    padding: 6px 14px; cursor: pointer; color: var(--text-secondary);
+  }
+  nav.tabs button[aria-selected="true"] {
+    background: var(--surface-1); border-color: var(--line); color: var(--text-primary); font-weight: 600;
+  }
+  section[hidden] { display: none; }
+
+  .card { background: var(--surface-1); border: 1px solid var(--line); border-radius: 14px; padding: 14px; }
+  .note { color: var(--text-secondary); font-size: 13px; margin: 8px 0 0; }
+
+  .chartwrap { position: relative; }
+  svg { display: block; width: 100%; height: auto; touch-action: pan-y; }
+  svg.narrow .axis text { font-size: 13px; }
+  svg.narrow .qlabel, svg.narrow .axtitle { font-size: 14px; }
+  svg.narrow .dlabel { font-size: 14px; }
+  .axis line, .axis path { stroke: var(--line); stroke-width: 1; }
+  .axis text { fill: var(--text-muted); font-size: 11px; }
+  .qlabel { fill: var(--text-muted); font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+  .axtitle { fill: var(--text-secondary); font-size: 12px; }
+  .dot { fill: var(--dot); opacity: .75; }
+  .dot.hl0 { fill: var(--series-1); opacity: 1; }
+  .dot.hl1 { fill: var(--series-2); opacity: 1; }
+  .dot.hl2 { fill: var(--series-3); opacity: 1; }
+  .ring { stroke: var(--surface-1); stroke-width: 2; }
+  .tail { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tail.hl0 { stroke: var(--series-1); } .tail.hl1 { stroke: var(--series-2); } .tail.hl2 { stroke: var(--series-3); }
+  .dlabel { font-size: 11px; fill: var(--text-primary); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; }
+
+  .tooltip {
+    position: absolute; pointer-events: none; z-index: 5; min-width: 132px;
+    background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 20px rgba(0,0,0,.12);
+    color: var(--text-secondary); opacity: 0; transition: opacity .1s;
+  }
+  .tooltip strong { display: block; font-size: 14px; color: var(--text-primary); }
+  .tooltip .num { font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600; }
+
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; color: var(--text-secondary); }
+  .legend span.key { display: inline-block; width: 18px; height: 2px; vertical-align: middle; margin-right: 6px; border-radius: 2px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 12px; }
+  .controls select, .controls input {
+    background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px;
+  }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-1); }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line); }
+  th:first-child, td:first-child, th.txt, td.txt { text-align: left; }
+  thead th { position: sticky; top: 0; background: var(--surface-2); cursor: pointer; font-weight: 600; z-index: 1; }
+  thead th:hover { color: var(--series-1); }
+  tbody tr:hover { background: var(--surface-2); }
+  tbody tr.sel { outline: 2px solid var(--series-1); outline-offset: -2px; }
+  td.num { font-variant-numeric: tabular-nums; }
+  .pos { color: var(--up); } .neg { color: var(--down); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; }
+  .muted { color: var(--text-muted); }
+  footer { margin-top: 36px; color: var(--text-muted); font-size: 12px; }
+  @media (max-width: 640px) {
+    .wrap { padding: 14px 12px 48px; }
+    h1 { font-size: 18px; }
+    th, td { padding: 6px 8px; }
+    .tiles { grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .tile { padding: 8px 9px; }
+    .tile .k { font-size: 11px; }
+    .tile .v { font-size: 18px; }
+    .card { padding: 10px; }
+    nav.tabs { margin: 12px 0 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>台股 RS 動能與族群輪動</h1>
+      <div class="sub" id="meta">載入中…</div>
+    </div>
+    <button class="ghost" id="theme" type="button">切換深淺色</button>
+  </header>
+
+  <div class="tiles" id="tiles"></div>
+
+  <nav class="tabs" id="tabs" role="tablist">
+    <button role="tab" data-tab="rrg" aria-selected="true">族群輪動</button>
+    <button role="tab" data-tab="groups" aria-selected="false">族群強度</button>
+    <button role="tab" data-tab="stocks" aria-selected="false">個股</button>
+    <button role="tab" data-tab="ic" aria-selected="false">因子檢定</button>
+  </nav>
+
+  <section id="tab-rrg">
+    <div class="card">
+      <div class="chartwrap">
+        <svg id="rrg" viewBox="0 0 860 560" role="img" aria-label="族群輪動四象限圖"></svg>
+        <div class="tooltip" id="tip-rrg"></div>
+      </div>
+      <div class="legend" id="rrg-legend">
+        <span><span class="key" style="background:var(--dot)"></span>族群位置</span>
+        <span class="muted">點一下圓點或下表的列，會畫出該族群近 5 日的移動軌跡（最多 3 個）</span>
+      </div>
+      <p class="note">
+        橫軸是相對大盤的強度，縱軸是強度的變化率，兩軸都以 100 為中心（當天所有族群的平均）。
+        右上=領先、左上=改善、右下=走弱、左下=落後，資金輪動通常逆時針繞行。
+      </p>
+    </div>
+
+    <h2>族群座標與 5 日移動</h2>
+    <div class="controls">
+      <select id="rrg-type"><option value="">全部類型</option></select>
+      <select id="rrg-quad"><option value="">全部象限</option></select>
+      <button class="ghost" id="rrg-clear" type="button">清除選取</button>
+    </div>
+    <div class="tablewrap"><table id="rrg-table"></table></div>
+  </section>
+
+  <section id="tab-groups" hidden>
+    <div class="controls">
+      <select id="g-type"><option value="">全部類型</option></select>
+      <input id="g-q" type="search" placeholder="搜尋族群…" size="14">
+    </div>
+    <div class="tablewrap"><table id="groups-table"></table></div>
+    <p class="note">成分股 RS 評等中位數與強勢股比例，用來分辨族群是全面走強，還是只有一兩檔在撐。</p>
+  </section>
+
+  <section id="tab-stocks" hidden>
+    <div class="controls">
+      <input id="s-q" type="search" placeholder="搜尋代碼或名稱…" size="16">
+      <select id="s-market"><option value="">上市＋上櫃</option><option>上市</option><option>上櫃</option></select>
+      <label class="muted">RS評等 ≥ <input id="s-rs" type="number" min="1" max="99" value="1" style="width:64px"></label>
+      <label class="muted"><input id="s-star" type="checkbox"> 只看 ⭐</label>
+      <label class="muted"><input id="s-high" type="checkbox"> 只看 RS線新高</label>
+      <span class="muted" id="s-count"></span>
+    </div>
+    <div class="tablewrap"><table id="stocks-table"></table></div>
+  </section>
+
+  <section id="tab-ic" hidden>
+    <p class="note" id="ic-note"></p>
+    <h2>各因子預測力</h2>
+    <div class="tablewrap"><table id="ic-table"></table></div>
+    <h2>五等分報酬（%）</h2>
+    <div class="tablewrap"><table id="icq-table"></table></div>
+    <p class="note">
+      平均 IC 是因子排名與之後報酬排名的相關係數，0.03～0.05 屬實務可用；
+      t 值已做重疊校正，|t| ≥ 2 才算統計顯著。回推期間有存活者偏誤，數字偏樂觀。
+    </p>
+  </section>
+
+  <footer>
+    資料由 GitHub Actions 每個交易日盤後自動更新。本頁僅為量化統計結果，不構成投資建議。
+  </footer>
+</div>
+
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const fmt = (v, d = 2) => (v === null || v === undefined || v === "") ? "" :
+  (typeof v === "number" ? v.toFixed(d) : String(v));
+
+let DATA = null, HL = [];           // HL: 被選取的族群（最多 3 個）
+
+/* ---------- 主題 ---------- */
+$("#theme").addEventListener("click", () => {
+  const cur = document.documentElement.getAttribute("data-theme");
+  const dark = cur ? cur === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  document.documentElement.setAttribute("data-theme", dark ? "light" : "dark");
+  if (DATA) drawRRG();
+});
+
+/* ---------- 分頁 ---------- */
+$("#tabs").addEventListener("click", e => {
+  const b = e.target.closest("button[data-tab]");
+  if (!b) return;
+  for (const t of $("#tabs").children) t.setAttribute("aria-selected", String(t === b));
+  for (const id of ["rrg", "groups", "stocks", "ic"])
+    $("#tab-" + id).hidden = id !== b.dataset.tab;
+  if (b.dataset.tab === "rrg") drawRRG();
+});
+
+/* ---------- 表格 ---------- */
+function table(el, rows, cols, opts = {}) {
+  el.innerHTML = "";
+  if (!rows.length) { el.innerHTML = "<tbody><tr><td class='txt muted'>沒有符合的資料</td></tr></tbody>"; return; }
+  const thead = document.createElement("thead"), tr = document.createElement("tr");
+  cols.forEach(c => {
+    const th = document.createElement("th");
+    th.textContent = c.label ?? c.key;
+    if (c.text) th.className = "txt";
+    th.addEventListener("click", () => {
+      const asc = el._sort === c.key ? !el._asc : false;
+      el._sort = c.key; el._asc = asc;
+      const sorted = rows.slice().sort((a, b) => {
+        const x = a[c.key], y = b[c.key];
+        if (x === y) return 0;
+        if (x === null || x === undefined || x === "") return 1;
+        if (y === null || y === undefined || y === "") return -1;
+        return (typeof x === "number" && typeof y === "number") ? (asc ? x - y : y - x)
+          : (asc ? String(x).localeCompare(String(y), "zh-Hant") : String(y).localeCompare(String(x), "zh-Hant"));
+      });
+      table(el, sorted, cols, opts);
+    });
+    tr.appendChild(th);
+  });
+  thead.appendChild(tr); el.appendChild(thead);
+
+  const tb = document.createElement("tbody");
+  rows.forEach(r => {
+    const row = document.createElement("tr");
+    if (opts.rowKey && HL.indexOf(opts.rowKey(r)) >= 0) row.className = "sel";
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      const v = r[c.key];
+      if (c.text) td.className = "txt";
+      else if (typeof v === "number") {
+        td.className = "num";
+        if (c.sign && v > 0) td.classList.add("pos");
+        if (c.sign && v < 0) td.classList.add("neg");
+      }
+      td.textContent = typeof v === "number" ? fmt(v, c.d ?? 2) : (v ?? "");
+      row.appendChild(td);
+    });
+    if (opts.rowKey) {
+      row.style.cursor = "pointer";
+      row.addEventListener("click", () => { toggleHL(opts.rowKey(r)); });
+    }
+    tb.appendChild(row);
+  });
+  el.appendChild(tb);
+}
+
+function toggleHL(key) {
+  const i = HL.indexOf(key);
+  if (i >= 0) HL.splice(i, 1);
+  else { HL.push(key); if (HL.length > 3) HL.shift(); }
+  drawRRG(); renderRRGTable();
+}
+
+/* ---------- RRG 圖 ---------- */
+function drawRRG() {
+  const svg = $("#rrg"), tip = $("#tip-rrg");
+  const rows = filteredRRG();
+  svg.innerHTML = "";
+  if (!rows.length) return;
+
+  // 窄螢幕用較小的 viewBox，同樣的字級在手機上才看得清楚
+  const narrow = innerWidth < 640;
+  svg.classList.toggle("narrow", narrow);
+  const W = narrow ? 460 : 860, H = narrow ? 430 : 520;
+  const m = narrow ? { t: 16, r: 16, b: 42, l: 48 } : { t: 22, r: 22, b: 46, l: 54 };
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const xs = rows.map(r => r["RS-Ratio"]), ys = rows.map(r => r["RS-Momentum"]);
+  const tails = (DATA.tails || {});
+  // 以實際資料範圍取軸（強制中心線 100 留在畫面內），而不是硬性對稱，
+  // 否則少數極端族群會把另外三個象限撐成大片空白
+  const range = arr => {
+    let lo = Math.min(...arr), hi = Math.max(...arr);
+    const pad = Math.max(0.35, (hi - lo) * 0.12);
+    lo -= pad; hi += pad;
+    const margin = (hi - lo) * 0.08;
+    lo = Math.min(lo, 100 - margin); hi = Math.max(hi, 100 + margin);
+    return [lo, hi];
+  };
+  const [x0, x1] = range(xs), [y0, y1] = range(ys);
+  const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
+  const Y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
+  const NS = "http://www.w3.org/2000/svg";
+  const add = (tag, attrs, parent = svg) => {
+    const e = document.createElementNS(NS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    parent.appendChild(e); return e;
+  };
+
+  // 四象限底色（表面層，不是資料色）
+  const cx = X(100), cy = Y(100);
+  const quads = [
+    [cx, m.t, W - m.r - cx, cy - m.t, "var(--q-lead)", "領先", "end"],
+    [m.l, m.t, cx - m.l, cy - m.t, "var(--q-improve)", "改善", "start"],
+    [cx, cy, W - m.r - cx, H - m.b - cy, "var(--q-weaken)", "走弱", "end"],
+    [m.l, cy, cx - m.l, H - m.b - cy, "var(--q-lag)", "落後", "start"],
+  ];
+  quads.forEach(([x, y, w, h, fill, label, anchor]) => {
+    if (w <= 0 || h <= 0) return;
+    add("rect", { x, y, width: w, height: h, fill, rx: 6 });
+    const isTop = y === m.t;
+    add("text", {
+      x: anchor === "end" ? x + w - 10 : x + 10,
+      y: isTop ? y + 18 : y + h - 8,
+      "text-anchor": anchor === "end" ? "end" : "start", class: "qlabel"
+    }).textContent = label;
+  });
+
+  // 軸
+  const ax = add("g", { class: "axis" });
+  add("line", { x1: m.l, y1: cy, x2: W - m.r, y2: cy }, ax);
+  add("line", { x1: cx, y1: m.t, x2: cx, y2: H - m.b }, ax);
+  add("line", { x1: m.l, y1: H - m.b, x2: W - m.r, y2: H - m.b }, ax);
+  add("line", { x1: m.l, y1: m.t, x2: m.l, y2: H - m.b }, ax);
+  const ticks = (lo, hi) => {
+    const raw = (hi - lo) / (narrow ? 4 : 6);
+    const st = [0.5, 1, 2, 5].find(s => s >= raw) || 10;
+    const out = [];
+    for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) out.push(Math.round(v * 10) / 10);
+    return out;
+  };
+  ticks(x0, x1).forEach(v =>
+    add("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, ax).textContent = v);
+  ticks(y0, y1).forEach(v =>
+    add("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = v);
+  add("text", { x: (m.l + W - m.r) / 2, y: H - 8, "text-anchor": "middle", class: "axtitle" })
+    .textContent = "RS-Ratio　相對大盤強度 →";
+  add("text", { x: 14, y: (m.t + H - m.b) / 2, "text-anchor": "middle", class: "axtitle",
+                transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` })
+    .textContent = "RS-Momentum　強度變化率 →";
+
+  // 軌跡（只畫被選取的族群）
+  HL.forEach((key, i) => {
+    const t = tails[key];
+    if (!t || t.length < 2) return;
+    const d = t.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ");
+    add("path", { d, class: "tail hl" + i });
+  });
+
+  // 圓點
+  rows.forEach(r => {
+    const key = r["類型"] + "／" + r["族群"];
+    const i = HL.indexOf(key);
+    const g = add("g", {});
+    add("circle", {
+      cx: X(r["RS-Ratio"]), cy: Y(r["RS-Momentum"]), r: i >= 0 ? 7 : 5.5,
+      class: "dot ring" + (i >= 0 ? " hl" + i : "")
+    }, g);
+    add("circle", {
+      cx: X(r["RS-Ratio"]), cy: Y(r["RS-Momentum"]), r: 14, fill: "transparent",
+      style: "cursor:pointer"
+    }, g).addEventListener("click", () => toggleHL(key));
+    if (i >= 0) {
+      const px = X(r["RS-Ratio"]), right = px > W - m.r - 90;   // 靠右的點把標籤放左邊，不要被裁掉
+      add("text", {
+        x: px + (right ? -11 : 11), y: Y(r["RS-Momentum"]) - 9,
+        "text-anchor": right ? "end" : "start", class: "dlabel"
+      }, g).textContent = r["族群"];
+    }
+    g.addEventListener("pointerenter", ev => {
+      tip.innerHTML = "";
+      const s = document.createElement("strong"); s.textContent = r["族群"];
+      const p = document.createElement("div");
+      p.innerHTML = `強度 <span class="num">${fmt(r["RS-Ratio"])}</span>　動能 <span class="num">${fmt(r["RS-Momentum"])}</span><br>`;
+      const q = document.createElement("div");
+      q.textContent = `${r["象限"]}・${r["判讀"] || ""}・成分股 ${r["成分股數"]}`;
+      tip.append(s, p, q);
+      const box = svg.getBoundingClientRect();
+      tip.style.left = Math.min(box.width - 160, Math.max(0, (ev.clientX - box.left) + 14)) + "px";
+      tip.style.top = Math.max(0, (ev.clientY - box.top) - 10) + "px";
+      tip.style.opacity = 1;
+    });
+    g.addEventListener("pointerleave", () => { tip.style.opacity = 0; });
+  });
+
+  // 圖例：選取的族群用線條 key
+  const lg = $("#rrg-legend");
+  lg.innerHTML = "";
+  const base = document.createElement("span");
+  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>族群位置';
+  lg.appendChild(base);
+  HL.forEach((k, i) => {
+    const s = document.createElement("span");
+    s.innerHTML = `<span class="key" style="background:var(--series-${i + 1})"></span>`;
+    s.append(document.createTextNode(k.split("／")[1] + " 近 5 日軌跡"));
+    lg.appendChild(s);
+  });
+  if (!HL.length) {
+    const hint = document.createElement("span");
+    hint.className = "muted";
+    hint.textContent = "點一下圓點或下表的列，會畫出該族群近 5 日的移動軌跡（最多 3 個）";
+    lg.appendChild(hint);
+  }
+}
+
+function filteredRRG() {
+  const t = $("#rrg-type").value, q = $("#rrg-quad").value;
+  return DATA.rrg.filter(r => (!t || r["類型"] === t) && (!q || r["象限"] === q));
+}
+
+function renderRRGTable() {
+  table($("#rrg-table"), filteredRRG(), [
+    { key: "類型", text: true }, { key: "族群", text: true },
+    { key: "成分股數", d: 0 }, { key: "RS-Ratio" }, { key: "RS-Momentum" },
+    { key: "象限", text: true }, { key: "5日Δ強度", sign: true }, { key: "5日Δ動能", sign: true },
+    { key: "軌跡", text: true }, { key: "判讀", text: true },
+  ], { rowKey: r => r["類型"] + "／" + r["族群"] });
+}
+
+/* ---------- 其他分頁 ---------- */
+function renderGroups() {
+  const t = $("#g-type").value, q = $("#g-q").value.trim();
+  const rows = DATA.groups.filter(r =>
+    (!t || r["類型"] === t) && (!q || String(r["族群"]).includes(q)));
+  table($("#groups-table"), rows, [
+    { key: "類型", text: true }, { key: "族群", text: true }, { key: "成分股數", d: 0 },
+    { key: "信賴度", text: true }, { key: "成分股RS評等中位數", d: 0 }, { key: "強勢股比例(%)", d: 0 },
+    { key: "當日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
+    { key: "20日RS(%)", sign: true }, { key: "60日RS(%)", sign: true },
+  ]);
+}
+
+function renderStocks() {
+  const q = $("#s-q").value.trim(), mk = $("#s-market").value;
+  const rs = Number($("#s-rs").value) || 1;
+  const star = $("#s-star").checked, high = $("#s-high").checked;
+  const rows = DATA.stocks.filter(r =>
+    (!mk || r["市場"] === mk) &&
+    (!q || String(r["代碼"]).includes(q) || String(r["股票名稱"]).includes(q)) &&
+    (Number(r["RS評等"]) >= rs) &&
+    (!star || r["動能精選"] === "⭐") &&
+    (!high || r["RS線60日新高"] === "★")
+  ).sort((a, b) => (b["RS評等"] ?? 0) - (a["RS評等"] ?? 0));
+  $("#s-count").textContent = `${rows.length} 檔（顯示前 300）`;
+  table($("#stocks-table"), rows.slice(0, 300), [
+    { key: "動能精選", text: true, label: "⭐" }, { key: "代碼", text: true },
+    { key: "股票名稱", text: true }, { key: "市場", text: true },
+    { key: "細族群", text: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
+    { key: "收盤價" }, { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
+    { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
+    { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
+    { key: "20日外資集中度(%)", sign: true }, { key: "20日投信集中度(%)", sign: true },
+    { key: "投信連買天數", d: 0 }, { key: "日均成交值(億)" },
+  ]);
+}
+
+function renderIC() {
+  $("#ic-note").textContent = DATA.ic_note || "";
+  table($("#ic-table"), DATA.ic_summary, [
+    { key: "因子", text: true }, { key: "報酬期間(日)", d: 0 }, { key: "樣本日數", d: 0 },
+    { key: "平均IC", d: 4, sign: true }, { key: "ICIR" }, { key: "t值(重疊校正)", sign: true },
+    { key: "IC>0比例(%)", d: 0 }, { key: "前20%−後20%(%)", sign: true },
+    { key: "近60日平均IC", d: 4, sign: true }, { key: "判讀", text: true },
+  ]);
+  table($("#icq-table"), DATA.ic_quintile, [
+    { key: "因子", text: true }, { key: "報酬期間(日)", d: 0 },
+    { key: "Q1(最弱)", sign: true }, { key: "Q2", sign: true }, { key: "Q3", sign: true },
+    { key: "Q4", sign: true }, { key: "Q5(最強)", sign: true },
+    { key: "Q5−Q1", sign: true }, { key: "單調性" }, { key: "判讀", text: true },
+  ]);
+}
+
+/* ---------- 啟動 ---------- */
+function fillSelect(el, values) {
+  values.forEach(v => { const o = document.createElement("option"); o.textContent = v; el.appendChild(o); });
+}
+
+async function boot() {
+  let d;
+  try {
+    d = await (await fetch("data/latest.json", { cache: "no-store" })).json();
+  } catch (e) {
+    $("#meta").textContent = "資料載入失敗，請稍後再試。";
+    return;
+  }
+  DATA = d;
+  DATA.tails = DATA.tails || {};
+
+  $("#meta").textContent =
+    `基準日 ${d.asof}　·　更新於 ${String(d.generated_at).replace("T", " ").slice(0, 16)}`;
+
+  const c = d.counts || {};
+  const tiles = [
+    ["候選股", c.stocks], ["上市", c.listed], ["上櫃", c.otc],
+    ["⭐ 動能精選", c.starred], ["族群", c.rrg],
+    ["領先族群", d.rrg.filter(r => r["象限"] === "領先").length],
+    ["改善族群", d.rrg.filter(r => r["象限"] === "改善").length],
+  ];
+  $("#tiles").innerHTML = "";
+  tiles.forEach(([k, v]) => {
+    const el = document.createElement("div"); el.className = "tile";
+    const a = document.createElement("div"); a.className = "k"; a.textContent = k;
+    const b = document.createElement("div"); b.className = "v"; b.textContent = v ?? "–";
+    el.append(a, b); $("#tiles").appendChild(el);
+  });
+
+  fillSelect($("#rrg-type"), [...new Set(d.rrg.map(r => r["類型"]))]);
+  fillSelect($("#rrg-quad"), ["領先", "改善", "走弱", "落後"]);
+  fillSelect($("#g-type"), [...new Set(d.groups.map(r => r["類型"]))]);
+
+  ["#rrg-type", "#rrg-quad"].forEach(s =>
+    $(s).addEventListener("change", () => { drawRRG(); renderRRGTable(); }));
+  $("#rrg-clear").addEventListener("click", () => { HL = []; drawRRG(); renderRRGTable(); });
+  ["#g-type", "#g-q"].forEach(s => $(s).addEventListener("input", renderGroups));
+  ["#s-q", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
+    $(s).addEventListener("input", renderStocks));
+
+  drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC();
+  addEventListener("resize", () => drawRRG());
+}
+boot();
+</script>
+</body>
+</html>
