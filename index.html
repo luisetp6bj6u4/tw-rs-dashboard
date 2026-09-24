@@ -112,6 +112,13 @@
   .dot.hl2 { fill: var(--series-3); opacity: 1; }
   .ring { stroke: var(--surface-1); stroke-width: 2; }
   .tail { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .tail.faint { stroke: var(--dot); stroke-width: 1.4; opacity: .38; }
+  .tailpt { fill: var(--dot); opacity: .45; }
+  .tailpt.hl0 { fill: var(--series-1); opacity: .8; } .tailpt.hl1 { fill: var(--series-2); opacity: .8; }
+  .tailpt.hl2 { fill: var(--series-3); opacity: .8; }
+  .alabel { font-size: 11px; fill: var(--text-secondary); paint-order: stroke;
+            stroke: var(--surface-1); stroke-width: 3px; pointer-events: none; }
+  svg.narrow .alabel { font-size: 13px; }
   .tail.hl0 { stroke: var(--series-1); } .tail.hl1 { stroke: var(--series-2); } .tail.hl2 { stroke: var(--series-3); }
   .dlabel { font-size: 11px; fill: var(--text-primary); paint-order: stroke; stroke: var(--surface-1); stroke-width: 3px; }
 
@@ -196,6 +203,8 @@
     <div class="controls">
       <select id="rrg-type"><option value="">全部類型</option></select>
       <select id="rrg-quad"><option value="">全部象限</option></select>
+      <label class="muted"><input id="rrg-tails" type="checkbox" checked> 顯示全部軌跡</label>
+      <label class="muted"><input id="rrg-labels" type="checkbox" checked> 自動標名稱</label>
       <button class="ghost" id="rrg-clear" type="button">清除選取</button>
     </div>
     <div class="tablewrap"><table id="rrg-table"></table></div>
@@ -348,7 +357,13 @@ function drawRRG() {
     lo = Math.min(lo, 100 - margin); hi = Math.max(hi, 100 + margin);
     return [lo, hi];
   };
-  const [x0, x1] = range(xs), [y0, y1] = range(ys);
+  // 顯示軌跡時，軌跡的起點也要在畫面內
+  const tx = [...xs], ty = [...ys];
+  if ($("#rrg-tails").checked || HL.length) rows.forEach(r => {
+    const t = tails[r["類型"] + "／" + r["族群"]];
+    if (t) t.forEach(p => { tx.push(p[0]); ty.push(p[1]); });
+  });
+  const [x0, x1] = range(tx), [y0, y1] = range(ty);
   const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
   const Y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
   const NS = "http://www.w3.org/2000/svg";
@@ -400,13 +415,22 @@ function drawRRG() {
                 transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` })
     .textContent = "RS-Momentum　強度變化率 →";
 
-  // 軌跡（只畫被選取的族群）
-  HL.forEach((key, i) => {
+  // 軌跡：每個族群近 5 日的移動路徑（淡色），被選取的族群用顏色強調。
+  // 路徑上的小點越接近今天越大，圓點本身就是今天的位置，方向一看就懂。
+  const showAll = $("#rrg-tails").checked;
+  const tailPath = t => t.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ");
+  const drawTail = (key, cls, ptCls) => {
     const t = tails[key];
     if (!t || t.length < 2) return;
-    const d = t.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ");
-    add("path", { d, class: "tail hl" + i });
+    add("path", { d: tailPath(t), class: "tail " + cls });
+    t.slice(0, -1).forEach((p, j) =>
+      add("circle", { cx: X(p[0]), cy: Y(p[1]), r: 1.2 + j * 0.35, class: "tailpt " + ptCls }));
+  };
+  if (showAll) rows.forEach(r => {
+    const key = r["類型"] + "／" + r["族群"];
+    if (HL.indexOf(key) < 0) drawTail(key, "faint", "");
   });
+  HL.forEach((key, i) => drawTail(key, "hl" + i, "hl" + i));
 
   // 圓點
   rows.forEach(r => {
@@ -444,11 +468,53 @@ function drawRRG() {
     g.addEventListener("pointerleave", () => { tip.style.opacity = 0; });
   });
 
+  // 自動標名稱：只在空曠處標，擁擠處不標（滑鼠移上去仍看得到）。
+  // 由離中心最遠的族群開始放（通常最值得注意、也最空曠），碰到其他標籤或圓點就換位置，
+  // 四個位置都放不下就略過。
+  if ($("#rrg-labels").checked) {
+    const fs = narrow ? 13 : 11;
+    const textW = s => [...String(s)].reduce((w, ch) => w + (/[\u2E80-\uFFFF]/.test(ch) ? fs : fs * 0.6), 0);
+    const pts = rows.map(r => ({ r, x: X(r["RS-Ratio"]), y: Y(r["RS-Momentum"]),
+                                  key: r["類型"] + "／" + r["族群"] }));
+    const boxes = pts.map(p => ({ x0: p.x - 6, x1: p.x + 6, y0: p.y - 6, y1: p.y + 6 }));
+    // 象限角落的「領先／改善」等字也當作障礙物
+    quads.forEach(([x, y, w, h, , , anchor]) => {
+      const isTop = y === m.t, bx = anchor === "end" ? x + w - 44 : x + 4;
+      boxes.push({ x0: bx, x1: bx + 40, y0: isTop ? y + 4 : y + h - 22, y1: isTop ? y + 22 : y + h - 2 });
+    });
+    const hit = b => boxes.some(o => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
+    const inside = b => b.x0 >= m.l + 2 && b.x1 <= W - m.r - 2 && b.y0 >= m.t + 2 && b.y1 <= H - m.b - 2;
+    const crowdR = narrow ? 26 : 20;
+    const lab = add("g", {});
+    pts.sort((a, b) => Math.hypot(b.r["RS-Ratio"] - 100, b.r["RS-Momentum"] - 100)
+                     - Math.hypot(a.r["RS-Ratio"] - 100, a.r["RS-Momentum"] - 100))
+      .forEach(p => {
+        if (HL.indexOf(p.key) >= 0) return;             // 被選取的已經有標籤
+        const near = pts.filter(q => q !== p && Math.hypot(q.x - p.x, q.y - p.y) < crowdR).length;
+        if (near >= 2) return;                          // 擁擠處不標
+        const w = textW(p.r["族群"]), h = fs;
+        const cands = [
+          [p.x + 9, p.y + h * 0.35, "start", p.x + 8, p.y - h / 2],
+          [p.x - 9, p.y + h * 0.35, "end", p.x - 8 - w, p.y - h / 2],
+          [p.x, p.y - 9, "middle", p.x - w / 2, p.y - 9 - h],
+          [p.x, p.y + 9 + h * 0.8, "middle", p.x - w / 2, p.y + 8],
+        ];
+        for (const [tx, ty, anchor, bx, by] of cands) {
+          const b = { x0: bx - 2, x1: bx + w + 2, y0: by - 1, y1: by + h + 1 };
+          if (!inside(b) || hit(b)) continue;
+          boxes.push(b);
+          add("text", { x: tx, y: ty, "text-anchor": anchor, class: "alabel" }, lab)
+            .textContent = p.r["族群"];
+          break;
+        }
+      });
+  }
+
   // 圖例：選取的族群用線條 key
   const lg = $("#rrg-legend");
   lg.innerHTML = "";
   const base = document.createElement("span");
-  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>族群位置';
+  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>族群位置（淡線＝近 5 日軌跡，圓點為今天）';
   lg.appendChild(base);
   HL.forEach((k, i) => {
     const s = document.createElement("span");
@@ -572,6 +638,7 @@ async function boot() {
   ["#rrg-type", "#rrg-quad"].forEach(s =>
     $(s).addEventListener("change", () => { drawRRG(); renderRRGTable(); }));
   $("#rrg-clear").addEventListener("click", () => { HL = []; drawRRG(); renderRRGTable(); });
+  ["#rrg-tails", "#rrg-labels"].forEach(s => $(s).addEventListener("change", drawRRG));
   ["#g-type", "#g-q"].forEach(s => $(s).addEventListener("input", renderGroups));
   ["#s-q", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
