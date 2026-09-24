@@ -116,6 +116,15 @@
   .tailpt { fill: var(--dot); opacity: .45; }
   .tailpt.hl0 { fill: var(--series-1); opacity: .8; } .tailpt.hl1 { fill: var(--series-2); opacity: .8; }
   .tailpt.hl2 { fill: var(--series-3); opacity: .8; }
+  .animbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 0 0 8px; }
+  .animbar[hidden] { display: none; }
+  .animbar input[type=range] { flex: 1 1 220px; accent-color: var(--series-1); }
+  .animbar select { background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
+  .playbtn { min-width: 84px; font-weight: 600; }
+  .fdate { font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600; min-width: 92px; }
+  .watermark { fill: var(--text-primary); opacity: .07; font-size: 64px; font-weight: 700;
+               font-variant-numeric: tabular-nums; pointer-events: none; }
+  svg.narrow .watermark { font-size: 44px; }
   .alabel { font-size: 11px; fill: var(--text-secondary); paint-order: stroke;
             stroke: var(--surface-1); stroke-width: 3px; pointer-events: none; }
   svg.narrow .alabel { font-size: 13px; }
@@ -185,6 +194,17 @@
 
   <section id="tab-rrg">
     <div class="card">
+      <div class="animbar" id="animbar" hidden>
+        <button class="ghost playbtn" id="play" type="button">▶ 播放</button>
+        <input type="range" id="frame" min="0" max="0" step="1" value="0" aria-label="日期">
+        <span class="fdate" id="frame-date"></span>
+        <select id="speed" aria-label="速度">
+          <option value="360">慢</option><option value="200" selected>中</option><option value="100">快</option>
+        </select>
+        <select id="taillen" aria-label="尾巴長度">
+          <option value="5">尾巴 5 日</option><option value="10" selected>尾巴 10 日</option><option value="20">尾巴 20 日</option>
+        </select>
+      </div>
       <div class="chartwrap">
         <svg id="rrg" viewBox="0 0 860 560" role="img" aria-label="族群輪動四象限圖"></svg>
         <div class="tooltip" id="tip-rrg"></div>
@@ -195,7 +215,7 @@
       </div>
       <p class="note">
         橫軸是相對大盤的強度，縱軸是強度的變化率，兩軸都以 100 為中心（當天所有族群的平均）。
-        右上=領先、左上=改善、右下=走弱、左下=落後，資金輪動通常逆時針繞行。
+        右上=領先、左上=改善、右下=走弱、左下=落後，資金輪動通常順時針繞行（改善→領先→走弱→落後）。
       </p>
     </div>
 
@@ -333,47 +353,86 @@ function toggleHL(key) {
 }
 
 /* ---------- RRG 圖 ---------- */
+/* ---------- 動畫狀態 ---------- */
+const ANIM = { f: 0, playing: false, raf: 0, t0: 0, f0: 0 };
+let LABEL_KEYS = new Set();          // 暫停時算好「該標名稱的族群」，播放時沿用，避免標籤閃爍
+const hasPaths = () => DATA.paths && DATA.paths.dates && DATA.paths.dates.length > 1;
+const QUAD = (x, y) => x >= 100 ? (y >= 100 ? "領先" : "走弱") : (y >= 100 ? "改善" : "落後");
+
+// 第 f 格（可為小數）的位置：兩天之間線性內插，播放起來才平順
+function posAt(key, f) {
+  const s = DATA.paths.series[key];
+  if (!s) return null;
+  const i = Math.floor(f), j = Math.min(i + 1, s.length - 1), w = f - i;
+  const a = s[i], b = s[j];
+  if (!a) return b && w > 0.5 ? b : null;
+  if (!b || w === 0) return a;
+  return [a[0] + (b[0] - a[0]) * w, a[1] + (b[1] - a[1]) * w];
+}
+
 function drawRRG() {
   const svg = $("#rrg"), tip = $("#tip-rrg");
   const rows = filteredRRG();
   svg.innerHTML = "";
   if (!rows.length) return;
 
-  // 窄螢幕用較小的 viewBox，同樣的字級在手機上才看得清楚
   const narrow = innerWidth < 640;
   svg.classList.toggle("narrow", narrow);
   const W = narrow ? 460 : 860, H = narrow ? 430 : 520;
   const m = narrow ? { t: 16, r: 16, b: 42, l: 48 } : { t: 22, r: 22, b: 46, l: 54 };
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  const xs = rows.map(r => r["RS-Ratio"]), ys = rows.map(r => r["RS-Momentum"]);
-  const tails = (DATA.tails || {});
-  // 以實際資料範圍取軸（強制中心線 100 留在畫面內），而不是硬性對稱，
-  // 否則少數極端族群會把另外三個象限撐成大片空白
+  const keyOf = r => r["類型"] + "／" + r["族群"];
+  const anim = hasPaths();
+  const tails = DATA.tails || {};
+  const L = Number($("#taillen").value) || 10;
+  const lastF = anim ? DATA.paths.dates.length - 1 : 0;
+  const f = anim ? Math.min(ANIM.f, lastF) : 0;
+  const atEnd = !anim || f >= lastF - 1e-6;
+
+  // 每個族群這一格的位置與尾巴
+  const pts = [];
+  rows.forEach(r => {
+    const key = keyOf(r);
+    let x, y, tail;
+    if (anim && !atEnd) {
+      const p = posAt(key, f);
+      if (!p) return;
+      [x, y] = p;
+      const s = DATA.paths.series[key], i = Math.floor(f);
+      tail = s.slice(Math.max(0, i - L + 1), i + 1).filter(Boolean);
+      tail.push(p);
+    } else {
+      x = r["RS-Ratio"]; y = r["RS-Momentum"];
+      if (anim) {
+        const s = DATA.paths.series[key];
+        tail = s ? s.slice(Math.max(0, lastF - L + 1)).filter(Boolean) : null;
+      } else tail = tails[key];
+    }
+    pts.push({ r, key, x, y, tail, quad: atEnd ? r["象限"] : QUAD(x, y) });
+  });
+
+  // 座標範圍：動畫時用整段期間所有位置，播放中畫面才不會跟著跳
   const range = arr => {
     let lo = Math.min(...arr), hi = Math.max(...arr);
-    const pad = Math.max(0.35, (hi - lo) * 0.12);
+    const pad = Math.max(0.35, (hi - lo) * 0.1);
     lo -= pad; hi += pad;
     const margin = (hi - lo) * 0.08;
-    lo = Math.min(lo, 100 - margin); hi = Math.max(hi, 100 + margin);
-    return [lo, hi];
+    return [Math.min(lo, 100 - margin), Math.max(hi, 100 + margin)];
   };
-  // 顯示軌跡時，軌跡的起點也要在畫面內
-  const tx = [...xs], ty = [...ys];
-  if ($("#rrg-tails").checked || HL.length) rows.forEach(r => {
-    const t = tails[r["類型"] + "／" + r["族群"]];
-    if (t) t.forEach(p => { tx.push(p[0]); ty.push(p[1]); });
-  });
-  const [x0, x1] = range(tx), [y0, y1] = range(ty);
+  const ax_ = [], ay_ = [];
+  if (anim) rows.forEach(r => (DATA.paths.series[keyOf(r)] || []).forEach(p => { if (p) { ax_.push(p[0]); ay_.push(p[1]); } }));
+  pts.forEach(p => { ax_.push(p.x); ay_.push(p.y); (p.tail || []).forEach(q => { ax_.push(q[0]); ay_.push(q[1]); }); });
+  const [x0, x1] = range(ax_), [y0, y1] = range(ay_);
   const X = v => m.l + (v - x0) / (x1 - x0) * (W - m.l - m.r);
   const Y = v => H - m.b - (v - y0) / (y1 - y0) * (H - m.t - m.b);
   const NS = "http://www.w3.org/2000/svg";
   const add = (tag, attrs, parent = svg) => {
-    const e = document.createElementNS(NS, tag);
-    for (const k in attrs) e.setAttribute(k, attrs[k]);
-    parent.appendChild(e); return e;
+    const el = document.createElementNS(NS, tag);
+    for (const k in attrs) el.setAttribute(k, attrs[k]);
+    parent.appendChild(el); return el;
   };
 
-  // 四象限底色（表面層，不是資料色）
+  // 四象限底色
   const cx = X(100), cy = Y(100);
   const quads = [
     [cx, m.t, W - m.r - cx, cy - m.t, "var(--q-lead)", "領先", "end"],
@@ -385,12 +444,16 @@ function drawRRG() {
     if (w <= 0 || h <= 0) return;
     add("rect", { x, y, width: w, height: h, fill, rx: 6 });
     const isTop = y === m.t;
-    add("text", {
-      x: anchor === "end" ? x + w - 10 : x + 10,
-      y: isTop ? y + 18 : y + h - 8,
-      "text-anchor": anchor === "end" ? "end" : "start", class: "qlabel"
-    }).textContent = label;
+    add("text", { x: anchor === "end" ? x + w - 10 : x + 10, y: isTop ? y + 18 : y + h - 8,
+                  "text-anchor": anchor === "end" ? "end" : "start", class: "qlabel" }).textContent = label;
   });
+
+  // 日期浮水印（動畫時顯示目前是哪一天）
+  if (anim) {
+    const d = DATA.paths.dates[Math.round(f)] || "";
+    add("text", { x: (m.l + W - m.r) / 2, y: (m.t + H - m.b) / 2 + 20, "text-anchor": "middle",
+                  class: "watermark" }).textContent = d;
+  }
 
   // 軸
   const ax = add("g", { class: "axis" });
@@ -399,67 +462,54 @@ function drawRRG() {
   add("line", { x1: m.l, y1: H - m.b, x2: W - m.r, y2: H - m.b }, ax);
   add("line", { x1: m.l, y1: m.t, x2: m.l, y2: H - m.b }, ax);
   const ticks = (lo, hi) => {
-    const raw = (hi - lo) / (narrow ? 4 : 6);
-    const st = [0.5, 1, 2, 5].find(s => s >= raw) || 10;
+    // 刻度間距取 1、2、5 × 10^n，任何範圍都只會有 4～8 個刻度
+    const raw = (hi - lo) / (narrow ? 4 : 6), mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const st = [1, 2, 5, 10].map(k => k * mag).find(s => s >= raw);
     const out = [];
     for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) out.push(Math.round(v * 10) / 10);
     return out;
   };
-  ticks(x0, x1).forEach(v =>
-    add("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, ax).textContent = v);
-  ticks(y0, y1).forEach(v =>
-    add("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = v);
+  ticks(x0, x1).forEach(v => add("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, ax).textContent = v);
+  ticks(y0, y1).forEach(v => add("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = v);
   add("text", { x: (m.l + W - m.r) / 2, y: H - 8, "text-anchor": "middle", class: "axtitle" })
     .textContent = "RS-Ratio　相對大盤強度 →";
   add("text", { x: 14, y: (m.t + H - m.b) / 2, "text-anchor": "middle", class: "axtitle",
-                transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` })
-    .textContent = "RS-Momentum　強度變化率 →";
+                transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` }).textContent = "RS-Momentum　強度變化率 →";
 
-  // 軌跡：每個族群近 5 日的移動路徑（淡色），被選取的族群用顏色強調。
-  // 路徑上的小點越接近今天越大，圓點本身就是今天的位置，方向一看就懂。
+  // 軌跡：淡色為全部族群，選取的上色；小點越接近現在越大
   const showAll = $("#rrg-tails").checked;
-  const tailPath = t => t.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" ");
-  const drawTail = (key, cls, ptCls) => {
-    const t = tails[key];
-    if (!t || t.length < 2) return;
-    add("path", { d: tailPath(t), class: "tail " + cls });
-    t.slice(0, -1).forEach((p, j) =>
-      add("circle", { cx: X(p[0]), cy: Y(p[1]), r: 1.2 + j * 0.35, class: "tailpt " + ptCls }));
+  const drawTail = (tail, cls, ptCls) => {
+    if (!tail || tail.length < 2) return;
+    add("path", { d: tail.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" "),
+                  class: "tail " + cls });
+    const n = tail.length - 1;
+    tail.slice(0, -1).forEach((p, j) =>
+      add("circle", { cx: X(p[0]), cy: Y(p[1]), r: 1 + 2 * (j + 1) / (n + 1), class: "tailpt " + ptCls }));
   };
-  if (showAll) rows.forEach(r => {
-    const key = r["類型"] + "／" + r["族群"];
-    if (HL.indexOf(key) < 0) drawTail(key, "faint", "");
-  });
-  HL.forEach((key, i) => drawTail(key, "hl" + i, "hl" + i));
+  if (showAll) pts.forEach(p => { if (HL.indexOf(p.key) < 0) drawTail(p.tail, "faint", ""); });
+  pts.forEach(p => { const i = HL.indexOf(p.key); if (i >= 0) drawTail(p.tail, "hl" + i, "hl" + i); });
 
-  // 圓點
-  rows.forEach(r => {
-    const key = r["類型"] + "／" + r["族群"];
-    const i = HL.indexOf(key);
+  // 圓點（含滑鼠提示）
+  pts.forEach(p => {
+    const i = HL.indexOf(p.key), px = X(p.x), py = Y(p.y);
     const g = add("g", {});
-    add("circle", {
-      cx: X(r["RS-Ratio"]), cy: Y(r["RS-Momentum"]), r: i >= 0 ? 7 : 5.5,
-      class: "dot ring" + (i >= 0 ? " hl" + i : "")
-    }, g);
-    add("circle", {
-      cx: X(r["RS-Ratio"]), cy: Y(r["RS-Momentum"]), r: 14, fill: "transparent",
-      style: "cursor:pointer"
-    }, g).addEventListener("click", () => toggleHL(key));
+    add("circle", { cx: px, cy: py, r: i >= 0 ? 7 : 5.5, class: "dot ring" + (i >= 0 ? " hl" + i : "") }, g);
+    add("circle", { cx: px, cy: py, r: 14, fill: "transparent", style: "cursor:pointer" }, g)
+      .addEventListener("click", () => toggleHL(p.key));
     if (i >= 0) {
-      const px = X(r["RS-Ratio"]), right = px > W - m.r - 90;   // 靠右的點把標籤放左邊，不要被裁掉
-      add("text", {
-        x: px + (right ? -11 : 11), y: Y(r["RS-Momentum"]) - 9,
-        "text-anchor": right ? "end" : "start", class: "dlabel"
-      }, g).textContent = r["族群"];
+      const right = px > W - m.r - 90;
+      add("text", { x: px + (right ? -11 : 11), y: py - 9, "text-anchor": right ? "end" : "start",
+                    class: "dlabel" }, g).textContent = p.r["族群"];
     }
     g.addEventListener("pointerenter", ev => {
       tip.innerHTML = "";
-      const s = document.createElement("strong"); s.textContent = r["族群"];
-      const p = document.createElement("div");
-      p.innerHTML = `強度 <span class="num">${fmt(r["RS-Ratio"])}</span>　動能 <span class="num">${fmt(r["RS-Momentum"])}</span><br>`;
-      const q = document.createElement("div");
-      q.textContent = `${r["象限"]}・${r["判讀"] || ""}・成分股 ${r["成分股數"]}`;
-      tip.append(s, p, q);
+      const s = document.createElement("strong"); s.textContent = p.r["族群"];
+      const a = document.createElement("div");
+      a.innerHTML = `強度 <span class="num">${fmt(p.x)}</span>　動能 <span class="num">${fmt(p.y)}</span>`;
+      const b = document.createElement("div");
+      b.textContent = atEnd ? `${p.r["象限"]}・${p.r["判讀"] || ""}・成分股 ${p.r["成分股數"]}`
+                            : `${DATA.paths.dates[Math.round(f)]}・${p.quad}・成分股 ${p.r["成分股數"]}`;
+      tip.append(s, a, b);
       const box = svg.getBoundingClientRect();
       tip.style.left = Math.min(box.width - 160, Math.max(0, (ev.clientX - box.left) + 14)) + "px";
       tip.style.top = Math.max(0, (ev.clientY - box.top) - 10) + "px";
@@ -468,66 +518,110 @@ function drawRRG() {
     g.addEventListener("pointerleave", () => { tip.style.opacity = 0; });
   });
 
-  // 自動標名稱：只在空曠處標，擁擠處不標（滑鼠移上去仍看得到）。
-  // 由離中心最遠的族群開始放（通常最值得注意、也最空曠），碰到其他標籤或圓點就換位置，
-  // 四個位置都放不下就略過。
+  // 名稱：暫停時在空曠處自動找位置；播放中沿用同一批族群、固定標在右側，避免閃爍
   if ($("#rrg-labels").checked) {
     const fs = narrow ? 13 : 11;
-    const textW = s => [...String(s)].reduce((w, ch) => w + (/[\u2E80-\uFFFF]/.test(ch) ? fs : fs * 0.6), 0);
-    const pts = rows.map(r => ({ r, x: X(r["RS-Ratio"]), y: Y(r["RS-Momentum"]),
-                                  key: r["類型"] + "／" + r["族群"] }));
-    const boxes = pts.map(p => ({ x0: p.x - 6, x1: p.x + 6, y0: p.y - 6, y1: p.y + 6 }));
-    // 象限角落的「領先／改善」等字也當作障礙物
-    quads.forEach(([x, y, w, h, , , anchor]) => {
-      const isTop = y === m.t, bx = anchor === "end" ? x + w - 44 : x + 4;
-      boxes.push({ x0: bx, x1: bx + 40, y0: isTop ? y + 4 : y + h - 22, y1: isTop ? y + 22 : y + h - 2 });
-    });
-    const hit = b => boxes.some(o => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
-    const inside = b => b.x0 >= m.l + 2 && b.x1 <= W - m.r - 2 && b.y0 >= m.t + 2 && b.y1 <= H - m.b - 2;
-    const crowdR = narrow ? 26 : 20;
+    const textW = s => [...String(s)].reduce((w, ch) => w + (/[⺀-￿]/.test(ch) ? fs : fs * 0.6), 0);
     const lab = add("g", {});
-    pts.sort((a, b) => Math.hypot(b.r["RS-Ratio"] - 100, b.r["RS-Momentum"] - 100)
-                     - Math.hypot(a.r["RS-Ratio"] - 100, a.r["RS-Momentum"] - 100))
-      .forEach(p => {
-        if (HL.indexOf(p.key) >= 0) return;             // 被選取的已經有標籤
-        const near = pts.filter(q => q !== p && Math.hypot(q.x - p.x, q.y - p.y) < crowdR).length;
-        if (near >= 2) return;                          // 擁擠處不標
-        const w = textW(p.r["族群"]), h = fs;
-        const cands = [
-          [p.x + 9, p.y + h * 0.35, "start", p.x + 8, p.y - h / 2],
-          [p.x - 9, p.y + h * 0.35, "end", p.x - 8 - w, p.y - h / 2],
-          [p.x, p.y - 9, "middle", p.x - w / 2, p.y - 9 - h],
-          [p.x, p.y + 9 + h * 0.8, "middle", p.x - w / 2, p.y + 8],
-        ];
-        for (const [tx, ty, anchor, bx, by] of cands) {
-          const b = { x0: bx - 2, x1: bx + w + 2, y0: by - 1, y1: by + h + 1 };
-          if (!inside(b) || hit(b)) continue;
-          boxes.push(b);
-          add("text", { x: tx, y: ty, "text-anchor": anchor, class: "alabel" }, lab)
-            .textContent = p.r["族群"];
-          break;
-        }
+    if (ANIM.playing) {
+      pts.forEach(p => {
+        if (!LABEL_KEYS.has(p.key) || HL.indexOf(p.key) >= 0) return;
+        const px = X(p.x), right = px > W - m.r - textW(p.r["族群"]) - 12;
+        add("text", { x: px + (right ? -9 : 9), y: Y(p.y) + fs * 0.35, "text-anchor": right ? "end" : "start",
+                      class: "alabel" }, lab).textContent = p.r["族群"];
       });
+    } else {
+      const P = pts.map(p => ({ p, x: X(p.x), y: Y(p.y) }));
+      const boxes = P.map(q => ({ x0: q.x - 6, x1: q.x + 6, y0: q.y - 6, y1: q.y + 6 }));
+      quads.forEach(([x, y, w, h, , , anchor]) => {
+        const isTop = y === m.t, bx = anchor === "end" ? x + w - 44 : x + 4;
+        boxes.push({ x0: bx, x1: bx + 40, y0: isTop ? y + 4 : y + h - 22, y1: isTop ? y + 22 : y + h - 2 });
+      });
+      const hit = b => boxes.some(o => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
+      const inside = b => b.x0 >= m.l + 2 && b.x1 <= W - m.r - 2 && b.y0 >= m.t + 2 && b.y1 <= H - m.b - 2;
+      const crowdR = narrow ? 26 : 20;
+      LABEL_KEYS = new Set();
+      P.sort((a, b) => Math.hypot(b.p.x - 100, b.p.y - 100) - Math.hypot(a.p.x - 100, a.p.y - 100))
+        .forEach(q => {
+          if (HL.indexOf(q.p.key) >= 0) return;
+          if (P.filter(o => o !== q && Math.hypot(o.x - q.x, o.y - q.y) < crowdR).length >= 2) return;
+          const w = textW(q.p.r["族群"]), h = fs;
+          const cands = [
+            [q.x + 9, q.y + h * 0.35, "start", q.x + 8, q.y - h / 2],
+            [q.x - 9, q.y + h * 0.35, "end", q.x - 8 - w, q.y - h / 2],
+            [q.x, q.y - 9, "middle", q.x - w / 2, q.y - 9 - h],
+            [q.x, q.y + 9 + h * 0.8, "middle", q.x - w / 2, q.y + 8],
+          ];
+          for (const [tx, ty, anchor, bx, by] of cands) {
+            const b = { x0: bx - 2, x1: bx + w + 2, y0: by - 1, y1: by + h + 1 };
+            if (!inside(b) || hit(b)) continue;
+            boxes.push(b); LABEL_KEYS.add(q.p.key);
+            add("text", { x: tx, y: ty, "text-anchor": anchor, class: "alabel" }, lab).textContent = q.p.r["族群"];
+            break;
+          }
+        });
+    }
   }
 
-  // 圖例：選取的族群用線條 key
+  // 圖例
   const lg = $("#rrg-legend");
   lg.innerHTML = "";
   const base = document.createElement("span");
-  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>族群位置（淡線＝近 5 日軌跡，圓點為今天）';
+  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>';
+  base.append(document.createTextNode(`族群位置（淡線＝近 ${anim ? L : 5} 日軌跡，圓點為${atEnd ? "今天" : "當日"}）`));
   lg.appendChild(base);
   HL.forEach((k, i) => {
     const s = document.createElement("span");
     s.innerHTML = `<span class="key" style="background:var(--series-${i + 1})"></span>`;
-    s.append(document.createTextNode(k.split("／")[1] + " 近 5 日軌跡"));
+    s.append(document.createTextNode(k.split("／")[1]));
     lg.appendChild(s);
   });
   if (!HL.length) {
     const hint = document.createElement("span");
     hint.className = "muted";
-    hint.textContent = "點一下圓點或下表的列，會畫出該族群近 5 日的移動軌跡（最多 3 個）";
+    hint.textContent = "點一下圓點或下表的列，可用顏色標出該族群（最多 3 個）";
     lg.appendChild(hint);
   }
+}
+
+/* ---------- 播放控制 ---------- */
+function setFrame(f) {
+  ANIM.f = f;
+  $("#frame").value = Math.round(f);
+  $("#frame-date").textContent = DATA.paths.dates[Math.round(f)] || "";
+  drawRRG();
+}
+function stopAnim() {
+  ANIM.playing = false; cancelAnimationFrame(ANIM.raf);
+  $("#play").textContent = "▶ 播放";
+  drawRRG();                                   // 停下來重新找標籤位置
+}
+function playAnim() {
+  const last = DATA.paths.dates.length - 1;
+  if (ANIM.f >= last) ANIM.f = 0;              // 已在最後一天就從頭播
+  ANIM.playing = true; ANIM.t0 = performance.now(); ANIM.f0 = ANIM.f;
+  $("#play").textContent = "❚❚ 暫停";
+  const step = now => {
+    if (!ANIM.playing) return;
+    const msPer = Number($("#speed").value) || 200;
+    const f = Math.min(last, ANIM.f0 + (now - ANIM.t0) / msPer);
+    setFrame(f);
+    if (f >= last) { stopAnim(); return; }
+    ANIM.raf = requestAnimationFrame(step);
+  };
+  ANIM.raf = requestAnimationFrame(step);
+}
+function initAnim() {
+  if (!hasPaths()) return;
+  const last = DATA.paths.dates.length - 1;
+  $("#animbar").hidden = false;
+  $("#frame").max = last;
+  ANIM.f = last;
+  $("#frame").value = last;
+  $("#frame-date").textContent = DATA.paths.dates[last];
+  $("#play").addEventListener("click", () => ANIM.playing ? stopAnim() : playAnim());
+  $("#frame").addEventListener("input", e => { if (ANIM.playing) stopAnim(); setFrame(Number(e.target.value)); });
+  $("#taillen").addEventListener("change", drawRRG);
 }
 
 function filteredRRG() {
@@ -643,6 +737,7 @@ async function boot() {
   ["#s-q", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
 
+  initAnim();
   drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC();
   addEventListener("resize", () => drawRRG());
 }
