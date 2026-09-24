@@ -119,6 +119,9 @@
   .animbar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; margin: 0 0 8px; }
   .animbar[hidden] { display: none; }
   .animbar input[type=range] { flex: 1 1 220px; accent-color: var(--series-1); }
+  .sublink { cursor: pointer; border-bottom: 1px dotted var(--text-muted); }
+  .sublink:hover { color: var(--series-1); border-bottom-style: solid; }
+  #s-sub { max-width: 220px; }
   .animbar select { background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 4px 6px; }
   .playbtn { min-width: 84px; font-weight: 600; }
   .fdate { font-variant-numeric: tabular-nums; color: var(--text-primary); font-weight: 600; min-width: 92px; }
@@ -266,6 +269,7 @@
   <section id="tab-stocks" hidden>
     <div class="controls">
       <input id="s-q" type="search" placeholder="搜尋代碼或名稱…" size="16">
+      <select id="s-sub" title="細族群"><option value="">全部細族群</option></select>
       <select id="s-market"><option value="">上市＋上櫃</option><option>上市</option><option>上櫃</option></select>
       <label class="muted">RS評等 ≥ <input id="s-rs" type="number" min="1" max="99" value="1" style="width:64px"></label>
       <label class="muted"><input id="s-star" type="checkbox"> 只看 ⭐</label>
@@ -357,7 +361,14 @@ function table(el, rows, cols, opts = {}) {
         if (c.sign && v > 0) td.classList.add("pos");
         if (c.sign && v < 0) td.classList.add("neg");
       }
-      td.textContent = typeof v === "number" ? fmt(v, c.d ?? 2) : (v ?? "");
+      if (c.subs && v) {
+        // 細族群拆成可點的小標籤，點哪個就篩哪個
+        subsOf(r).forEach((s, i) => {
+          if (i) td.append("、");
+          const a = document.createElement("span"); a.className = "sublink"; a.textContent = s;
+          a.title = `只看「${s}」`; td.appendChild(a);
+        });
+      } else td.textContent = typeof v === "number" ? fmt(v, c.d ?? 2) : (v ?? "");
       row.appendChild(td);
     });
     if (opts.rowKey) {
@@ -705,8 +716,10 @@ function renderStocks() {
   const q = $("#s-q").value.trim(), mk = $("#s-market").value;
   const rs = Number($("#s-rs").value) || 1;
   const star = $("#s-star").checked, high = $("#s-high").checked;
+  const sub = $("#s-sub").value;
   const rows = DATA.stocks.filter(r =>
     (!mk || r["市場"] === mk) &&
+    (!sub || subsOf(r).includes(sub)) &&
     (!q || String(r["代碼"]).includes(q) || String(r["股票名稱"]).includes(q)) &&
     (Number(r["RS評等"]) >= rs) &&
     (!star || r["動能精選"] === "⭐") &&
@@ -716,7 +729,7 @@ function renderStocks() {
   table($("#stocks-table"), rows.slice(0, 300), [
     { key: "動能精選", text: true, label: "⭐" }, { key: "代碼", text: true },
     { key: "股票名稱", text: true }, { key: "市場", text: true },
-    { key: "細族群", text: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
+    { key: "細族群", text: true, subs: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
     { key: "收盤價" }, { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
     { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
     { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
@@ -739,6 +752,20 @@ function renderIC() {
     { key: "Q4", sign: true }, { key: "Q5(最強)", sign: true },
     { key: "Q5−Q1", sign: true }, { key: "單調性" }, { key: "判讀", text: true },
   ]);
+}
+
+// 一檔股票可能屬於多個細族群（例如「IC設計、矽智財IP」），拆開來比對
+const subsOf = r => String(r["細族群"] || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean);
+
+function fillSubs() {
+  const cnt = {};
+  DATA.stocks.forEach(r => subsOf(r).forEach(s => { cnt[s] = (cnt[s] || 0) + 1; }));
+  const el = $("#s-sub");
+  Object.entries(cnt).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"))
+    .forEach(([s, n]) => {
+      const o = document.createElement("option"); o.value = s; o.textContent = `${s}（${n}）`;
+      el.appendChild(o);
+    });
 }
 
 /* ---------- 啟動 ---------- */
@@ -784,7 +811,14 @@ async function boot() {
   $("#rrg-clear").addEventListener("click", () => { HL = []; drawRRG(); renderRRGTable(); });
   ["#rrg-tails", "#rrg-labels"].forEach(s => $(s).addEventListener("change", drawRRG));
   ["#g-type", "#g-q"].forEach(s => $(s).addEventListener("input", renderGroups));
-  ["#s-q", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
+  fillSubs();
+  // 點表格裡的細族群，直接篩選該族群（多個時取點到的第一個）
+  $("#stocks-table").addEventListener("click", ev => {
+    const a = ev.target.closest(".sublink");
+    if (!a) return;
+    $("#s-sub").value = a.textContent; renderStocks();
+  });
+  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
 
   initAnim();
