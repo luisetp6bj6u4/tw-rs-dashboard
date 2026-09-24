@@ -125,6 +125,30 @@
   .watermark { fill: var(--text-primary); opacity: .07; font-size: 64px; font-weight: 700;
                font-variant-numeric: tabular-nums; pointer-events: none; }
   svg.narrow .watermark { font-size: 44px; }
+  /* 雷達風格：圖面固定為深色，四象限依「當下所在象限」上色 */
+  .radar-bg { fill: #070b16; }
+  .rgrid { stroke: #16203a; stroke-width: 1; }
+  .rcenter { stroke: #3b4d74; stroke-width: 1.2; stroke-dasharray: 5 5; }
+  .rtick { fill: #56647f; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .rtitle { fill: #6f7d99; font-size: 12px; }
+  .rq-corner { font-size: 13px; letter-spacing: .14em; font-weight: 600; }
+  .rq-num { font-size: 120px; font-weight: 800; font-family: Georgia, "Times New Roman", serif; opacity: .13; }
+  .rq-sub { font-size: 15px; letter-spacing: .5em; opacity: .16; }
+  .rdate { fill: #c9d3e8; font-size: 22px; letter-spacing: .22em; font-weight: 600;
+           font-variant-numeric: tabular-nums; }
+  svg.narrow .rq-num { font-size: 72px; } svg.narrow .rq-sub { font-size: 12px; letter-spacing: .3em; }
+  svg.narrow .rdate { font-size: 17px; } svg.narrow .rtick { font-size: 13px; }
+  svg.narrow .rq-corner { font-size: 12px; letter-spacing: .06em; }
+  .q-lead { --qc: #ff6b7d; } .q-improve { --qc: #3cc8f0; }
+  .q-weaken { --qc: #f7a928; } .q-lag { --qc: #a49cf2; }
+  .comet { color: var(--qc); filter: drop-shadow(0 0 3px var(--qc)); }
+  .comet line { stroke: var(--qc); stroke-linecap: round; }
+  .comet .head { fill: var(--qc); }
+  .comet.sel .head { stroke: #fff; stroke-width: 2; }
+  .rlabel { font-size: 11px; fill: #dfe6f5; paint-order: stroke; stroke: #070b16; stroke-width: 3px;
+            pointer-events: none; }
+  .rlabel.sel { font-weight: 700; fill: #fff; }
+  svg.narrow .rlabel { font-size: 13px; }
   .alabel { font-size: 11px; fill: var(--text-secondary); paint-order: stroke;
             stroke: var(--surface-1); stroke-width: 3px; pointer-events: none; }
   svg.narrow .alabel { font-size: 13px; }
@@ -432,74 +456,91 @@ function drawRRG() {
     parent.appendChild(el); return el;
   };
 
-  // 四象限底色
+  // ---- 背景、格線、四象限 ----
   const cx = X(100), cy = Y(100);
-  const quads = [
-    [cx, m.t, W - m.r - cx, cy - m.t, "var(--q-lead)", "領先", "end"],
-    [m.l, m.t, cx - m.l, cy - m.t, "var(--q-improve)", "改善", "start"],
-    [cx, cy, W - m.r - cx, H - m.b - cy, "var(--q-weaken)", "走弱", "end"],
-    [m.l, cy, cx - m.l, H - m.b - cy, "var(--q-lag)", "落後", "start"],
+  add("rect", { x: 0, y: 0, width: W, height: H, rx: 10, class: "radar-bg" });
+  const QCLS = { "領先": "q-lead", "改善": "q-improve", "走弱": "q-weaken", "落後": "q-lag" };
+  const quads = [   // x, y, w, h, 名稱, 英文, 編號, 角落位置
+    [cx, m.t, W - m.r - cx, cy - m.t, "領先", "LEADING", 1, "tr"],
+    [m.l, m.t, cx - m.l, cy - m.t, "改善", "IMPROVING", 2, "tl"],
+    [m.l, cy, cx - m.l, H - m.b - cy, "落後", "LAGGING", 3, "bl"],
+    [cx, cy, W - m.r - cx, H - m.b - cy, "走弱", "WEAKENING", 4, "br"],
   ];
-  quads.forEach(([x, y, w, h, fill, label, anchor]) => {
+  const TINT = { "領先": "rgba(255,80,100,.075)", "改善": "rgba(40,170,225,.075)",
+                 "落後": "rgba(120,110,225,.07)", "走弱": "rgba(240,160,40,.06)" };
+  quads.forEach(([x, y, w, h, name, en, num, pos]) => {
     if (w <= 0 || h <= 0) return;
-    add("rect", { x, y, width: w, height: h, fill, rx: 6 });
-    const isTop = y === m.t;
-    add("text", { x: anchor === "end" ? x + w - 10 : x + 10, y: isTop ? y + 18 : y + h - 8,
-                  "text-anchor": anchor === "end" ? "end" : "start", class: "qlabel" }).textContent = label;
+    add("rect", { x, y, width: w, height: h, fill: TINT[name] });
+    const g = add("g", { class: QCLS[name] });
+    // 大號象限編號與「第 N 象限」
+    if (w > 120 && h > 110) {
+      add("text", { x: x + w / 2, y: y + h / 2 + (narrow ? 18 : 30), "text-anchor": "middle",
+                    class: "rq-num", fill: "var(--qc)" }, g).textContent = num;
+      add("text", { x: x + w / 2, y: y + h / 2 + (narrow ? 42 : 66), "text-anchor": "middle",
+                    class: "rq-sub", fill: "var(--qc)" }, g).textContent = `第 ${num} 象限`;
+    }
+    const right = pos[1] === "r", top = pos[0] === "t";
+    add("text", { x: right ? x + w - 10 : x + 10, y: top ? y + 20 : y + h - 10,
+                  "text-anchor": right ? "end" : "start", class: "rq-corner", fill: "var(--qc)" }, g)
+      .textContent = narrow ? name : `${en} ${name}`;
   });
 
-  // 日期浮水印（動畫時顯示目前是哪一天）
-  if (anim) {
-    const d = DATA.paths.dates[Math.round(f)] || "";
-    add("text", { x: (m.l + W - m.r) / 2, y: (m.t + H - m.b) / 2 + 20, "text-anchor": "middle",
-                  class: "watermark" }).textContent = d;
-  }
-
-  // 軸
-  const ax = add("g", { class: "axis" });
-  add("line", { x1: m.l, y1: cy, x2: W - m.r, y2: cy }, ax);
-  add("line", { x1: cx, y1: m.t, x2: cx, y2: H - m.b }, ax);
-  add("line", { x1: m.l, y1: H - m.b, x2: W - m.r, y2: H - m.b }, ax);
-  add("line", { x1: m.l, y1: m.t, x2: m.l, y2: H - m.b }, ax);
+  // 格線與刻度
   const ticks = (lo, hi) => {
     // 刻度間距取 1、2、5 × 10^n，任何範圍都只會有 4～8 個刻度
-    const raw = (hi - lo) / (narrow ? 4 : 6), mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const raw = (hi - lo) / (narrow ? 4 : 7), mag = Math.pow(10, Math.floor(Math.log10(raw)));
     const st = [1, 2, 5, 10].map(k => k * mag).find(s => s >= raw);
     const out = [];
     for (let v = Math.ceil(lo / st) * st; v <= hi; v += st) out.push(Math.round(v * 10) / 10);
     return out;
   };
-  ticks(x0, x1).forEach(v => add("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle" }, ax).textContent = v);
-  ticks(y0, y1).forEach(v => add("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end" }, ax).textContent = v);
-  add("text", { x: (m.l + W - m.r) / 2, y: H - 8, "text-anchor": "middle", class: "axtitle" })
-    .textContent = "RS-Ratio　相對大盤強度 →";
-  add("text", { x: 14, y: (m.t + H - m.b) / 2, "text-anchor": "middle", class: "axtitle",
-                transform: `rotate(-90 14 ${(m.t + H - m.b) / 2})` }).textContent = "RS-Momentum　強度變化率 →";
+  ticks(x0, x1).forEach(v => {
+    if (Math.abs(v - 100) > 1e-9) add("line", { x1: X(v), y1: m.t, x2: X(v), y2: H - m.b, class: "rgrid" });
+    add("text", { x: X(v), y: H - m.b + 16, "text-anchor": "middle", class: "rtick" }).textContent = v;
+  });
+  ticks(y0, y1).forEach(v => {
+    if (Math.abs(v - 100) > 1e-9) add("line", { x1: m.l, y1: Y(v), x2: W - m.r, y2: Y(v), class: "rgrid" });
+    add("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end", class: "rtick" }).textContent = v;
+  });
+  add("line", { x1: m.l, y1: cy, x2: W - m.r, y2: cy, class: "rcenter" });
+  add("line", { x1: cx, y1: m.t, x2: cx, y2: H - m.b, class: "rcenter" });
+  add("text", { x: (m.l + W - m.r) / 2, y: H - 10, "text-anchor": "middle", class: "rtitle" })
+    .textContent = "RS-Ratio　相對強弱 →";
+  add("text", { x: 15, y: (m.t + H - m.b) / 2, "text-anchor": "middle", class: "rtitle",
+                transform: `rotate(-90 15 ${(m.t + H - m.b) / 2})` }).textContent = "RS-Momentum　動能 →";
 
-  // 軌跡：淡色為全部族群，選取的上色；小點越接近現在越大
+  // 日期（頂部中央）
+  const dateStr = anim ? (DATA.paths.dates[Math.round(f)] || "") : (DATA.asof || "");
+  add("text", { x: (m.l + W - m.r) / 2, y: m.t + (narrow ? 22 : 26), "text-anchor": "middle",
+                class: "rdate" }).textContent = dateStr;
+
+  // ---- 彗星：尾巴由細到粗、由淡到亮，顏色 = 當下所在象限 ----
   const showAll = $("#rrg-tails").checked;
-  const drawTail = (tail, cls, ptCls) => {
-    if (!tail || tail.length < 2) return;
-    add("path", { d: tail.map((p, j) => `${j ? "L" : "M"}${X(p[0]).toFixed(1)} ${Y(p[1]).toFixed(1)}`).join(" "),
-                  class: "tail " + cls });
+  const headW = narrow ? 5.5 : 6.5;
+  const drawComet = p => {
+    const i = HL.indexOf(p.key), sel = i >= 0;
+    const g = add("g", { class: `comet ${QCLS[p.quad]}` + (sel ? " sel" : "") });
+    const tail = (showAll || sel) ? (p.tail || []) : [];
     const n = tail.length - 1;
-    tail.slice(0, -1).forEach((p, j) =>
-      add("circle", { cx: X(p[0]), cy: Y(p[1]), r: 1 + 2 * (j + 1) / (n + 1), class: "tailpt " + ptCls }));
+    for (let k = 0; k < n; k++) {
+      const s = (k + 1) / n;                     // 0 → 1：越接近現在越粗越亮
+      add("line", { x1: X(tail[k][0]), y1: Y(tail[k][1]), x2: X(tail[k + 1][0]), y2: Y(tail[k + 1][1]),
+                    "stroke-width": (0.5 + s * (headW - 0.5)).toFixed(2),
+                    "stroke-opacity": (0.08 + 0.8 * Math.pow(s, 1.6)).toFixed(3) }, g);
+    }
+    const px = X(p.x), py = Y(p.y);
+    add("circle", { cx: px, cy: py, r: sel ? headW * 0.75 : headW * 0.55, class: "head" }, g);
+    return { g, px, py, sel };
   };
-  if (showAll) pts.forEach(p => { if (HL.indexOf(p.key) < 0) drawTail(p.tail, "faint", ""); });
-  pts.forEach(p => { const i = HL.indexOf(p.key); if (i >= 0) drawTail(p.tail, "hl" + i, "hl" + i); });
 
-  // 圓點（含滑鼠提示）
   pts.forEach(p => {
-    const i = HL.indexOf(p.key), px = X(p.x), py = Y(p.y);
-    const g = add("g", {});
-    add("circle", { cx: px, cy: py, r: i >= 0 ? 7 : 5.5, class: "dot ring" + (i >= 0 ? " hl" + i : "") }, g);
+    const { g, px, py, sel } = drawComet(p);
     add("circle", { cx: px, cy: py, r: 14, fill: "transparent", style: "cursor:pointer" }, g)
       .addEventListener("click", () => toggleHL(p.key));
-    if (i >= 0) {
+    if (sel) {
       const right = px > W - m.r - 90;
       add("text", { x: px + (right ? -11 : 11), y: py - 9, "text-anchor": right ? "end" : "start",
-                    class: "dlabel" }, g).textContent = p.r["族群"];
+                    class: "rlabel sel" }).textContent = p.r["族群"];
     }
     g.addEventListener("pointerenter", ev => {
       tip.innerHTML = "";
@@ -528,23 +569,26 @@ function drawRRG() {
         if (!LABEL_KEYS.has(p.key) || HL.indexOf(p.key) >= 0) return;
         const px = X(p.x), right = px > W - m.r - textW(p.r["族群"]) - 12;
         add("text", { x: px + (right ? -9 : 9), y: Y(p.y) + fs * 0.35, "text-anchor": right ? "end" : "start",
-                      class: "alabel" }, lab).textContent = p.r["族群"];
+                      class: "rlabel" }, lab).textContent = p.r["族群"];
       });
     } else {
       const P = pts.map(p => ({ p, x: X(p.x), y: Y(p.y) }));
       const boxes = P.map(q => ({ x0: q.x - 6, x1: q.x + 6, y0: q.y - 6, y1: q.y + 6 }));
-      quads.forEach(([x, y, w, h, , , anchor]) => {
-        const isTop = y === m.t, bx = anchor === "end" ? x + w - 44 : x + 4;
-        boxes.push({ x0: bx, x1: bx + 40, y0: isTop ? y + 4 : y + h - 22, y1: isTop ? y + 22 : y + h - 2 });
+      quads.forEach(([x, y, w, h, , , , pos]) => {
+        const right = pos[1] === "r", top = pos[0] === "t", cw = narrow ? 44 : 150;
+        const bx = right ? x + w - cw - 8 : x + 4;
+        boxes.push({ x0: bx, x1: bx + cw + 4, y0: top ? y + 4 : y + h - 26, y1: top ? y + 26 : y + h - 2 });
       });
+      // 頂部日期也當作障礙物
+      boxes.push({ x0: (m.l + W - m.r) / 2 - 90, x1: (m.l + W - m.r) / 2 + 90, y0: m.t, y1: m.t + 32 });
       const hit = b => boxes.some(o => b.x0 < o.x1 && b.x1 > o.x0 && b.y0 < o.y1 && b.y1 > o.y0);
       const inside = b => b.x0 >= m.l + 2 && b.x1 <= W - m.r - 2 && b.y0 >= m.t + 2 && b.y1 <= H - m.b - 2;
-      const crowdR = narrow ? 26 : 20;
+      const crowdR = narrow ? 22 : 15;        // 放寬：盡量多標
       LABEL_KEYS = new Set();
       P.sort((a, b) => Math.hypot(b.p.x - 100, b.p.y - 100) - Math.hypot(a.p.x - 100, a.p.y - 100))
         .forEach(q => {
           if (HL.indexOf(q.p.key) >= 0) return;
-          if (P.filter(o => o !== q && Math.hypot(o.x - q.x, o.y - q.y) < crowdR).length >= 2) return;
+          if (P.filter(o => o !== q && Math.hypot(o.x - q.x, o.y - q.y) < crowdR).length >= 3) return;
           const w = textW(q.p.r["族群"]), h = fs;
           const cands = [
             [q.x + 9, q.y + h * 0.35, "start", q.x + 8, q.y - h / 2],
@@ -556,7 +600,7 @@ function drawRRG() {
             const b = { x0: bx - 2, x1: bx + w + 2, y0: by - 1, y1: by + h + 1 };
             if (!inside(b) || hit(b)) continue;
             boxes.push(b); LABEL_KEYS.add(q.p.key);
-            add("text", { x: tx, y: ty, "text-anchor": anchor, class: "alabel" }, lab).textContent = q.p.r["族群"];
+            add("text", { x: tx, y: ty, "text-anchor": anchor, class: "rlabel" }, lab).textContent = q.p.r["族群"];
             break;
           }
         });
@@ -566,20 +610,26 @@ function drawRRG() {
   // 圖例
   const lg = $("#rrg-legend");
   lg.innerHTML = "";
+  [["領先", "#ff6b7d"], ["改善", "#3cc8f0"], ["走弱", "#f7a928"], ["落後", "#a49cf2"]].forEach(([n, c]) => {
+    const s = document.createElement("span");
+    s.innerHTML = `<span class="key" style="background:${c};height:4px"></span>`;
+    s.append(document.createTextNode(n));
+    lg.appendChild(s);
+  });
   const base = document.createElement("span");
-  base.innerHTML = '<span class="key" style="background:var(--dot)"></span>';
-  base.append(document.createTextNode(`族群位置（淡線＝近 ${anim ? L : 5} 日軌跡，圓點為${atEnd ? "今天" : "當日"}）`));
+  base.className = "muted";
+  base.textContent = `顏色＝${atEnd ? "今天" : "當日"}所在象限；彗星尾巴＝近 ${anim ? L : 5} 日移動軌跡，亮端為最新位置`;
   lg.appendChild(base);
   HL.forEach((k, i) => {
     const s = document.createElement("span");
-    s.innerHTML = `<span class="key" style="background:var(--series-${i + 1})"></span>`;
-    s.append(document.createTextNode(k.split("／")[1]));
+    s.innerHTML = `<span class="key" style="background:#fff"></span>`;
+    s.append(document.createTextNode("選取：" + k.split("／")[1]));
     lg.appendChild(s);
   });
   if (!HL.length) {
     const hint = document.createElement("span");
     hint.className = "muted";
-    hint.textContent = "點一下圓點或下表的列，可用顏色標出該族群（最多 3 個）";
+    hint.textContent = "點一下彗星或下表的列可標記族群（最多 3 個）";
     lg.appendChild(hint);
   }
 }
