@@ -269,6 +269,7 @@
   <section id="tab-stocks" hidden>
     <div class="controls">
       <input id="s-q" type="search" placeholder="搜尋代碼或名稱…" size="16">
+      <select id="s-chain" title="產業鏈"><option value="">全部產業鏈</option></select>
       <select id="s-sub" title="細族群"><option value="">全部細族群</option></select>
       <select id="s-market"><option value="">上市＋上櫃</option><option>上市</option><option>上櫃</option></select>
       <label class="muted">RS評等 ≥ <input id="s-rs" type="number" min="1" max="99" value="1" style="width:64px"></label>
@@ -716,9 +717,10 @@ function renderStocks() {
   const q = $("#s-q").value.trim(), mk = $("#s-market").value;
   const rs = Number($("#s-rs").value) || 1;
   const star = $("#s-star").checked, high = $("#s-high").checked;
-  const sub = $("#s-sub").value;
+  const sub = $("#s-sub").value, chain = $("#s-chain").value;
   const rows = DATA.stocks.filter(r =>
     (!mk || r["市場"] === mk) &&
+    (!chain || r["產業鏈"] === chain) &&
     (!sub || subsOf(r).includes(sub)) &&
     (!q || String(r["代碼"]).includes(q) || String(r["股票名稱"]).includes(q)) &&
     (Number(r["RS評等"]) >= rs) &&
@@ -729,7 +731,7 @@ function renderStocks() {
   table($("#stocks-table"), rows.slice(0, 300), [
     { key: "動能精選", text: true, label: "⭐" }, { key: "代碼", text: true },
     { key: "股票名稱", text: true }, { key: "市場", text: true },
-    { key: "細族群", text: true, subs: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
+    { key: "產業鏈", text: true }, { key: "細族群", text: true, subs: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
     { key: "收盤價" }, { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
     { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
     { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
@@ -757,16 +759,36 @@ function renderIC() {
 // 一檔股票可能屬於多個細族群（例如「IC設計、矽智財IP」），拆開來比對
 const subsOf = r => String(r["細族群"] || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean);
 
-function fillSubs() {
-  const cnt = {};
-  DATA.stocks.forEach(r => subsOf(r).forEach(s => { cnt[s] = (cnt[s] || 0) + 1; }));
-  const el = $("#s-sub");
+function fillCounted(el, cnt, keep) {
+  // 保留第一個「全部」選項，其餘依檔數由多到少重建
+  while (el.options.length > 1) el.remove(1);
   Object.entries(cnt).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], "zh-Hant"))
     .forEach(([s, n]) => {
       const o = document.createElement("option"); o.value = s; o.textContent = `${s}（${n}）`;
       el.appendChild(o);
     });
+  el.value = keep && cnt[keep] ? keep : "";
 }
+
+// 細族群選單只列出目前產業鏈底下的族群
+function fillSubs() {
+  const chain = $("#s-chain").value, cnt = {};
+  DATA.stocks.filter(r => !chain || r["產業鏈"] === chain)
+    .forEach(r => subsOf(r).forEach(s => { cnt[s] = (cnt[s] || 0) + 1; }));
+  fillCounted($("#s-sub"), cnt, $("#s-sub").value);
+}
+
+function fillChains() {
+  const cnt = {};
+  DATA.stocks.forEach(r => { if (r["產業鏈"]) cnt[r["產業鏈"]] = (cnt[r["產業鏈"]] || 0) + 1; });
+  fillCounted($("#s-chain"), cnt, "");
+  $("#s-chain").hidden = !Object.keys(cnt).length;     // 舊資料沒有產業鏈欄位時不顯示
+}
+
+// 族群類型固定順序：產業鏈（最粗）→ 細族群 → 官方產業
+const TYPE_ORDER = ["產業鏈", "細族群", "官方產業"];
+const typesOf = rows => [...new Set(rows.map(r => r["類型"]))]
+  .sort((a, b) => (TYPE_ORDER.indexOf(a) + 99) % 99 - (TYPE_ORDER.indexOf(b) + 99) % 99);
 
 /* ---------- 啟動 ---------- */
 function fillSelect(el, values) {
@@ -802,16 +824,20 @@ async function boot() {
     el.append(a, b); $("#tiles").appendChild(el);
   });
 
-  fillSelect($("#rrg-type"), [...new Set(d.rrg.map(r => r["類型"]))]);
+  fillSelect($("#rrg-type"), typesOf(d.rrg));
+  // 族群多時全部畫在一起會糊成一團，預設先看產業鏈，再往下切細族群
+  if (d.rrg.some(r => r["類型"] === "產業鏈")) $("#rrg-type").value = "產業鏈";
   fillSelect($("#rrg-quad"), ["領先", "改善", "走弱", "落後"]);
-  fillSelect($("#g-type"), [...new Set(d.groups.map(r => r["類型"]))]);
+  fillSelect($("#g-type"), typesOf(d.groups));
 
   ["#rrg-type", "#rrg-quad"].forEach(s =>
     $(s).addEventListener("change", () => { drawRRG(); renderRRGTable(); }));
   $("#rrg-clear").addEventListener("click", () => { HL = []; drawRRG(); renderRRGTable(); });
   ["#rrg-tails", "#rrg-labels"].forEach(s => $(s).addEventListener("change", drawRRG));
   ["#g-type", "#g-q"].forEach(s => $(s).addEventListener("input", renderGroups));
+  fillChains();
   fillSubs();
+  $("#s-chain").addEventListener("input", () => { fillSubs(); renderStocks(); });
   // 點表格裡的細族群，直接篩選該族群（多個時取點到的第一個）
   $("#stocks-table").addEventListener("click", ev => {
     const a = ev.target.closest(".sublink");
