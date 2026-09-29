@@ -85,6 +85,11 @@
   .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
   nav.tabs { display: flex; gap: 6px; margin: 18px 0 12px; flex-wrap: wrap; }
+  .mkt { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
+  .mkt a { padding: 5px 14px; border-radius: 999px; text-decoration: none; color: var(--text-secondary);
+           font-weight: 600; font-size: 14px; }
+  .mkt a[aria-current="page"] { background: var(--series-1); color: #fff; }
+  .hdr-right { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   nav.tabs button {
     background: none; border: 1px solid transparent; border-radius: 999px;
     padding: 6px 14px; cursor: pointer; color: var(--text-secondary);
@@ -204,10 +209,15 @@
 <div class="wrap">
   <header>
     <div>
-      <h1>台股 RS 動能與族群輪動</h1>
+      <h1 id="title">台股 RS 動能與族群輪動</h1>
       <div class="sub" id="meta">載入中…</div>
     </div>
-    <button class="ghost" id="theme" type="button">切換深淺色</button>
+    <div class="hdr-right">
+      <nav class="mkt" aria-label="市場">
+        <a href="./" id="mkt-tw">台股</a><a href="./?m=us" id="mkt-us">美股</a>
+      </nav>
+      <button class="ghost" id="theme" type="button">切換深淺色</button>
+    </div>
   </header>
 
   <div class="tiles" id="tiles"></div>
@@ -271,10 +281,11 @@
       <input id="s-q" type="search" placeholder="搜尋代碼或名稱…" size="16">
       <select id="s-chain" title="產業鏈"><option value="">全部產業鏈</option></select>
       <select id="s-sub" title="細族群"><option value="">全部細族群</option></select>
-      <select id="s-market"><option value="">上市＋上櫃</option><option>上市</option><option>上櫃</option></select>
+      <select id="s-market"><option value="">全部市場</option></select>
       <label class="muted">RS評等 ≥ <input id="s-rs" type="number" min="1" max="99" value="1" style="width:64px"></label>
       <label class="muted"><input id="s-star" type="checkbox"> 只看 ⭐</label>
       <label class="muted"><input id="s-high" type="checkbox"> 只看 RS線新高</label>
+      <label class="muted" id="s-trend-wrap" hidden><input id="s-trend" type="checkbox"> 只看趨勢模板</label>
       <span class="muted" id="s-count"></span>
     </div>
     <div class="tablewrap"><table id="stocks-table"></table></div>
@@ -725,10 +736,11 @@ function renderStocks() {
     (!q || String(r["代碼"]).includes(q) || String(r["股票名稱"]).includes(q)) &&
     (Number(r["RS評等"]) >= rs) &&
     (!star || r["動能精選"] === "⭐") &&
-    (!high || r["RS線60日新高"] === "★")
+    (!high || r["RS線60日新高"] === "★") &&
+    (!($("#s-trend") && $("#s-trend").checked) || r["趨勢模板"] === "✓")
   ).sort((a, b) => (b["RS評等"] ?? 0) - (a["RS評等"] ?? 0));
   $("#s-count").textContent = `${rows.length} 檔（顯示前 300）`;
-  table($("#stocks-table"), rows.slice(0, 300), [
+  table($("#stocks-table"), rows.slice(0, 300), MARKET === "us" ? US_STOCK_COLS : [
     { key: "動能精選", text: true, label: "⭐" }, { key: "代碼", text: true },
     { key: "股票名稱", text: true }, { key: "市場", text: true },
     { key: "產業鏈", text: true }, { key: "細族群", text: true, subs: true }, { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 },
@@ -739,6 +751,18 @@ function renderStocks() {
     { key: "投信連買天數", d: 0 }, { key: "日均成交值(億)" },
   ]);
 }
+
+const US_STOCK_COLS = [
+  { key: "動能精選", text: true, label: "⭐" }, { key: "代碼", text: true, label: "代號" },
+  { key: "股票名稱", text: true, label: "名稱" }, { key: "市場", text: true, label: "交易所" },
+  { key: "產業鏈", text: true }, { key: "細族群", text: true, subs: true },
+  { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 }, { key: "收盤價", label: "收盤價(US$)" },
+  { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
+  { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
+  { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距52週高(%)" },
+  { key: "趨勢模板", text: true }, { key: "50日上漲/下跌量比", label: "上漲/下跌量比" },
+  { key: "相對成交量" }, { key: "20日均成交額(百萬美元)", d: 0, label: "20日均成交額(百萬$)" },
+];
 
 function renderIC() {
   $("#ic-note").textContent = DATA.ic_note || "";
@@ -795,10 +819,21 @@ function fillSelect(el, values) {
   values.forEach(v => { const o = document.createElement("option"); o.textContent = v; el.appendChild(o); });
 }
 
+// 市場：?m=us 看美股，否則台股。兩個市場各自一份資料，切換時整頁重新載入
+const MARKET = new URLSearchParams(location.search).get("m") === "us" ? "us" : "tw";
+const MKT = {
+  tw: { title: "台股 RS 動能與族群輪動", data: "data/latest.json" },
+  us: { title: "美股 RS 動能與族群輪動", data: "data/us/latest.json" },
+}[MARKET];
+
 async function boot() {
   let d;
+  $("#title").textContent = MKT.title;
+  document.title = MKT.title;
+  $(MARKET === "us" ? "#mkt-us" : "#mkt-tw").setAttribute("aria-current", "page");
+  $("#s-trend-wrap").hidden = MARKET !== "us";
   try {
-    d = await (await fetch("data/latest.json", { cache: "no-store" })).json();
+    d = await (await fetch(MKT.data, { cache: "no-store" })).json();
   } catch (e) {
     $("#meta").textContent = "資料載入失敗，請稍後再試。";
     return;
@@ -810,7 +845,12 @@ async function boot() {
     `基準日 ${d.asof}　·　更新於 ${String(d.generated_at).replace("T", " ").slice(0, 16)}`;
 
   const c = d.counts || {};
-  const tiles = [
+  const tiles = MARKET === "us" ? [
+    ["候選股", c.stocks], ["NYSE", c.listed], ["Nasdaq", c.otc],
+    ["⭐ 動能精選", c.starred], ["趨勢模板", c.trend], ["族群", c.rrg],
+    ["領先族群", d.rrg.filter(r => r["象限"] === "領先").length],
+    ["改善族群", d.rrg.filter(r => r["象限"] === "改善").length],
+  ] : [
     ["候選股", c.stocks], ["上市", c.listed], ["上櫃", c.otc],
     ["⭐ 動能精選", c.starred], ["族群", c.rrg],
     ["領先族群", d.rrg.filter(r => r["象限"] === "領先").length],
@@ -835,6 +875,10 @@ async function boot() {
   $("#rrg-clear").addEventListener("click", () => { HL = []; drawRRG(); renderRRGTable(); });
   ["#rrg-tails", "#rrg-labels"].forEach(s => $(s).addEventListener("change", drawRRG));
   ["#g-type", "#g-q"].forEach(s => $(s).addEventListener("input", renderGroups));
+  // 市場下拉依資料產生（台股：上市／上櫃；美股：NYSE／Nasdaq…）
+  const mcnt = {};
+  d.stocks.forEach(r => { if (r["市場"]) mcnt[r["市場"]] = (mcnt[r["市場"]] || 0) + 1; });
+  fillCounted($("#s-market"), mcnt, "");
   fillChains();
   fillSubs();
   $("#s-chain").addEventListener("input", () => { fillSubs(); renderStocks(); });
@@ -844,7 +888,7 @@ async function boot() {
     if (!a) return;
     $("#s-sub").value = a.textContent; renderStocks();
   });
-  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high"].forEach(s =>
+  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high", "#s-trend"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
 
   initAnim();
