@@ -85,6 +85,7 @@
   .tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
 
   nav.tabs { display: flex; gap: 6px; margin: 18px 0 12px; flex-wrap: wrap; }
+  .subhead { font-size: 15px; margin: 22px 0 4px; }
   .mkt { display: inline-flex; border: 1px solid var(--line); border-radius: 999px; padding: 3px; gap: 2px; }
   .mkt a { padding: 5px 14px; border-radius: 999px; text-decoration: none; color: var(--text-secondary);
            font-weight: 600; font-size: 14px; }
@@ -226,6 +227,7 @@
     <button role="tab" data-tab="rrg" aria-selected="true">族群輪動</button>
     <button role="tab" data-tab="groups" aria-selected="false">族群強度</button>
     <button role="tab" data-tab="stocks" aria-selected="false">個股</button>
+    <button role="tab" data-tab="link" aria-selected="false">台美連動</button>
     <button role="tab" data-tab="ic" aria-selected="false">因子檢定</button>
   </nav>
 
@@ -291,6 +293,18 @@
     <div class="tablewrap"><table id="stocks-table"></table></div>
   </section>
 
+  <section id="tab-link" hidden>
+    <p class="note" id="link-head">載入中…</p>
+    <div class="tiles" id="link-mkt"></div>
+    <h3 class="subhead">對照族群：美股當晚 → 台股隔日</h3>
+    <p class="note muted">依「台股預期」絕對值排序。相關係數 0.1～0.2 屬中度、&gt; 0.2 為強；|t| ≥ 2 為統計顯著。
+      預期 = Beta × 美股當晚超額表現，只是歷史關係的延伸，不是保證。</p>
+    <div class="tablewrap"><table id="link-table"></table></div>
+    <h3 class="subhead">自動發現：每個台股細族群最相關的美股族群</h3>
+    <p class="note muted">不限對照表，從全部美股族群中找領先關係最強者；只列 |t| ≥ 3.5（排除上百組比較下的巧合）。</p>
+    <div class="tablewrap"><table id="link-auto"></table></div>
+  </section>
+
   <section id="tab-ic" hidden>
     <p class="note" id="ic-note"></p>
     <h2>各因子預測力</h2>
@@ -329,7 +343,7 @@ $("#tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-tab]");
   if (!b) return;
   for (const t of $("#tabs").children) t.setAttribute("aria-selected", String(t === b));
-  for (const id of ["rrg", "groups", "stocks", "ic"])
+  for (const id of ["rrg", "groups", "stocks", "link", "ic"])
     $("#tab-" + id).hidden = id !== b.dataset.tab;
   if (b.dataset.tab === "rrg") drawRRG();
 });
@@ -764,6 +778,45 @@ const US_STOCK_COLS = [
   { key: "相對成交量" }, { key: "20日均成交額(百萬美元)", d: 0, label: "20日均成交額(百萬$)" },
 ];
 
+/* ---------- 台美連動（兩個市場共用 data/link.json）---------- */
+const noType = s => String(s || "").replace(/^(細族群|產業鏈|官方產業)／/, "");
+async function renderLink() {
+  let L;
+  try {
+    L = await (await fetch("data/link.json", { cache: "no-store" })).json();
+  } catch (e) {
+    $("#link-head").textContent = "台美連動資料尚未產生（美股排程跑完後才會有）。";
+    return;
+  }
+  $("#link-head").textContent =
+    `美股 ${L.us_date} 收盤 → 台股 ${L.tw_done ? L.tw_date : "下一個交易日"}。` + (L.note || "");
+  const m = L.market || {};
+  $("#link-mkt").innerHTML = "";
+  [["SPY 當晚", m["SPY當日(%)"], "%"], ["加權指數 預期", m["加權預期(%)"], "%"],
+   ["大盤相關係數", m.corr, ""], ["大盤同向率", m.hit, "%"]].forEach(([k, v, u]) => {
+    const el = document.createElement("div"); el.className = "tile";
+    const a = document.createElement("div"); a.className = "k"; a.textContent = k;
+    const b = document.createElement("div"); b.className = "v";
+    b.textContent = v == null ? "–" : (typeof v === "number" && u === "%" && k !== "大盤同向率" && v > 0 ? "+" : "") + v + u;
+    el.append(a, b); $("#link-mkt").appendChild(el);
+  });
+  const rows = (L.pairs || []).map(r => ({ ...r, 美股: noType(r["美股族群"]), 台股: noType(r["台股族群"]) }));
+  const cols = [
+    { key: "美股", text: true, label: "美股族群" }, { key: "美股當日(%)", sign: true }, { key: "美股5日(%)", sign: true },
+    { key: "台股", text: true, label: "→ 台股族群" }, { key: "台股預期(%)", sign: true },
+  ];
+  if (L.tw_done) cols.push({ key: "台股實際(%)", sign: true });
+  cols.push({ key: "相關係數", d: 3, sign: true }, { key: "Beta", d: 2 }, { key: "t值", sign: true },
+            { key: "同向率(%)", d: 0 }, { key: "連動邏輯", text: true });
+  table($("#link-table"), rows, cols);
+  const auto = (L.auto || []).map(r => ({ ...r, 台股: noType(r["台股族群"]), 美股: noType(r["最相關美股族群"]) }));
+  table($("#link-auto"), auto, [
+    { key: "台股", text: true, label: "台股細族群" }, { key: "美股", text: true, label: "← 最相關美股族群" },
+    { key: "相關係數", d: 3, sign: true }, { key: "Beta", d: 2 }, { key: "t值", sign: true }, { key: "同向率(%)", d: 0 },
+    { key: "美股當日(%)", sign: true }, { key: "台股預期(%)", sign: true },
+  ]);
+}
+
 function renderIC() {
   $("#ic-note").textContent = DATA.ic_note || "";
   table($("#ic-table"), DATA.ic_summary, [
@@ -893,6 +946,7 @@ async function boot() {
 
   initAnim();
   drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC();
+  renderLink();
   addEventListener("resize", () => drawRRG());
 }
 boot();
