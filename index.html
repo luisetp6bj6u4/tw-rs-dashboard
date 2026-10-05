@@ -240,6 +240,18 @@
   #w-table .x { border: 0; background: none; cursor: pointer; color: var(--text-muted); font-size: 16px; padding: 0 4px; }
   #w-table .x:hover { color: var(--up); }
   #w-msg:empty { display: none; }
+  .w-lists { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 6px; }
+  .w-lists .chip { border: 1px solid var(--line); background: var(--surface-1); border-radius: 999px; padding: 4px 12px;
+                   cursor: pointer; font-size: 13px; }
+  .w-lists .chip[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); font-weight: 600; }
+  .w-lists .chip .n { opacity: .65; margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .w-lists .act { font-size: 12.5px; padding: 3px 9px; }
+  .w-sync { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text-secondary); margin: 2px 0 8px; }
+  .w-sync .ok { color: var(--series-3); font-weight: 650; }
+  .w-setup { margin: 0 0 12px; font-size: 13px; }
+  .w-setup[hidden] { display: none; }
+  .w-setup ol { margin: 6px 0 8px; padding-left: 20px; }
+  .w-setup input { background: var(--surface-1); border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px; width: min(420px, 100%); }
   footer { margin-top: 36px; color: var(--text-muted); font-size: 12px; }
   @media (max-width: 640px) {
     .wrap { padding: 14px 12px 48px; }
@@ -399,6 +411,21 @@
   </section>
 
   <section id="tab-watch" hidden>
+    <div class="w-sync" id="w-sync"></div>
+    <div class="card w-setup" id="w-setup" hidden>
+      <b>設定跨裝置同步</b>（清單存在你 GitHub 帳號下的一個私密 Gist，每台裝置設定一次）
+      <ol>
+        <li>到 <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Fine-grained token</a>：
+          名稱隨意、Expiration 選 1 年、Repository access 選「Public repositories」，
+          Permissions → Account permissions →「Gists」設為 <b>Read and write</b>，其他都不用開，按 Generate token。</li>
+        <li>把產生的 token（github_pat_ 開頭）貼在下面按「儲存」。第一台裝置會自動建立私密 Gist，其他裝置貼同一個 token 就會找到同一份清單。</li>
+      </ol>
+      <input id="w-token" type="password" autocomplete="off" placeholder="github_pat_…" aria-label="GitHub token">
+      <button class="ghost" id="w-token-save" type="button">儲存</button>
+      <button class="ghost" id="w-token-del" type="button">移除這台裝置的 token</button>
+      <p class="note muted">token 只存在這台裝置的瀏覽器，只能讀寫 Gist，不能動你的程式 repo；不用時可以在 GitHub 刪除該 token。</p>
+    </div>
+    <div class="w-lists" id="w-lists"></div>
     <div class="controls">
       <div class="w-add">
         <input id="w-q" type="search" autocomplete="off" spellcheck="false" placeholder="輸入代號或名稱…" aria-label="新增股票"
@@ -406,7 +433,7 @@
         <ul class="w-sugg" id="w-sugg" role="listbox" hidden></ul>
       </div>
       <button class="ghost" id="w-share" type="button" title="複製含清單的網址，在其他裝置開啟即可匯入">複製分享連結</button>
-      <button class="ghost" id="w-clear" type="button">清空清單</button>
+      <button class="ghost" id="w-clear" type="button">清空這組</button>
       <span class="muted" id="w-count"></span>
     </div>
     <p class="note" id="w-msg"></p>
@@ -1026,8 +1053,151 @@ function renderTop30Table() {
 
 /* ---------- 👀 觀察清單（存在這台裝置的瀏覽器；台股、美股各一份）---------- */
 const W = { key: "", list: [], sort: null, asc: false, hi: -1, sugg: [], byCode: {}, grp: {}, rank: {}, rrg: {}, init: false };
-const wLoad = () => { try { W.list = JSON.parse(localStorage.getItem(W.key) || "[]").filter(x => typeof x === "string"); } catch (e) { W.list = W.list || []; } };
-const wSave = () => { try { localStorage.setItem(W.key, JSON.stringify(W.list)); } catch (e) { /* 無痕模式等：只存在這次瀏覽 */ } };
+/* 儲存：每個市場最多 5 組清單 {name, codes}；資料放在 localStorage，設定 token 後同步到私密 Gist（跨裝置共用）
+   doc = { v: 1, updated, tw: { active, lists: [{ name, codes }] }, us: {...} } */
+const W_MAX = 5, GIST_DESC = "tw-rs-dashboard watchlists", GIST_FILE = "watchlists.json";
+const ls = { get: k => { try { return localStorage.getItem(k); } catch (e) { return null; } },
+             set: (k, v) => { try { v == null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch (e) { /* 無痕模式 */ } } };
+const wBlank = () => ({ active: 0, lists: [{ name: "清單 1", codes: [] }] });
+function wFix(doc) {
+  doc = doc && typeof doc === "object" ? doc : {};
+  ["tw", "us"].forEach(m => {
+    let s = doc[m];
+    if (!s || !Array.isArray(s.lists) || !s.lists.length) s = wBlank();
+    s.lists = s.lists.slice(0, W_MAX).map((l, i) => ({ name: String(l.name || `清單 ${i + 1}`).slice(0, 20),
+      codes: Array.isArray(l.codes) ? [...new Set(l.codes.map(String))] : [] }));
+    s.active = Math.min(Math.max(0, s.active | 0), s.lists.length - 1);
+    doc[m] = s;
+  });
+  doc.v = 1; doc.updated = doc.updated || 0;
+  return doc;
+}
+function wReadLocal() {
+  let doc = null;
+  try { doc = JSON.parse(ls.get("watchlists_v2") || "null"); } catch (e) { /* 壞掉就重建 */ }
+  if (!doc) {                                          // 舊版單一清單 → 「清單 1」
+    doc = {};
+    ["tw", "us"].forEach(m => { let old = []; try { old = JSON.parse(ls.get("watchlist_" + m) || "[]"); } catch (e) {}
+      doc[m] = { active: 0, lists: [{ name: "清單 1", codes: Array.isArray(old) ? old : [] }] }; });
+  }
+  return wFix(doc);
+}
+const wCur = () => W.doc[MARKET].lists[W.doc[MARKET].active];
+const wLoad = () => { W.doc = W.doc || wReadLocal(); W.list = wCur().codes; };
+const wSave = () => {
+  wCur().codes = W.list;
+  W.doc.updated = Date.now();
+  ls.set("watchlists_v2", JSON.stringify(W.doc));
+  wPushSoon();
+};
+
+/* ---- GitHub Gist 同步 ---- */
+const GH = "https://api.github.com";
+const ghTok = () => ls.get("gh_watch_token");
+async function gh(path, opt = {}) {
+  const r = await fetch(GH + path, { ...opt, cache: "no-store", headers: { Accept: "application/vnd.github+json",
+    Authorization: "Bearer " + ghTok(), ...(opt.body ? { "Content-Type": "application/json" } : {}) } });
+  if (!r.ok) { const e = new Error(`GitHub ${r.status}`); e.status = r.status; throw e; }
+  return r.status === 204 ? null : r.json();
+}
+async function gistFind() {
+  let id = ls.get("gh_watch_gist");
+  if (id) return id;
+  for (let page = 1; page <= 5 && !id; page++) {
+    const arr = await gh(`/gists?per_page=100&page=${page}`);
+    const g = arr.find(x => x.description === GIST_DESC && x.files && x.files[GIST_FILE]);
+    if (g) id = g.id;
+    if (arr.length < 100) break;
+  }
+  if (!id) {                                            // 第一台裝置：建立私密 Gist
+    const g = await gh("/gists", { method: "POST", body: JSON.stringify({ description: GIST_DESC, public: false,
+      files: { [GIST_FILE]: { content: JSON.stringify(W.doc, null, 1) } } }) });
+    id = g.id;
+  }
+  ls.set("gh_watch_gist", id);
+  return id;
+}
+async function gistPull() {
+  const g = await gh(`/gists/${await gistFind()}`);
+  const f = g.files && g.files[GIST_FILE];
+  let txt = f ? f.content : "";
+  if (f && f.truncated && f.raw_url) txt = await (await fetch(f.raw_url, { cache: "no-store" })).text();
+  return wFix(JSON.parse(txt || "{}"));
+}
+async function gistPush() {
+  await gh(`/gists/${await gistFind()}`, { method: "PATCH",
+    body: JSON.stringify({ files: { [GIST_FILE]: { content: JSON.stringify(W.doc, null, 1) } } }) });
+}
+let wPushT = 0;
+function wPushSoon() {
+  if (!ghTok()) return;
+  W.dirty = true; wSyncStatus("儲存中…");
+  clearTimeout(wPushT);
+  wPushT = setTimeout(async () => {
+    try { await gistPush(); W.dirty = false; W.syncedAt = new Date(); wSyncStatus(); }
+    catch (e) { wSyncStatus(null, e); }
+  }, 600);
+}
+// 從 Gist 取回：雲端較新就用雲端（另一台裝置改過）；這台有尚未上傳的修改就先上傳
+async function wSyncPull(first) {
+  if (!ghTok() || W.dirty) return;
+  try {
+    wSyncStatus("同步中…");
+    const remote = await gistPull();
+    if ((remote.updated || 0) > (W.doc.updated || 0)) {
+      W.doc = remote; ls.set("watchlists_v2", JSON.stringify(W.doc)); W.list = wCur().codes;
+      if (W.init) renderWatch();
+    } else if ((W.doc.updated || 0) > (remote.updated || 0) && first) {
+      await gistPush();
+    }
+    W.syncedAt = new Date(); wSyncStatus();
+  } catch (e) { wSyncStatus(null, e); }
+}
+function wSyncStatus(busy, err) {
+  const box = $("#w-sync"); if (!box) return;
+  box.innerHTML = "";
+  if (!ghTok()) {
+    box.append(el("span", "", "未設定同步：清單只存在這台裝置。"));
+  } else if (err) {
+    box.append(el("span", "neg", err.status === 401 ? "token 無效或已過期，請重新設定。" :
+      err.status === 404 || err.status === 403 ? "token 沒有 Gist 讀寫權限，請確認權限設定。" : `同步失敗（${err.message}），稍後會再試。`));
+  } else if (busy) {
+    box.append(el("span", "", busy));
+  } else {
+    box.append(el("span", "ok", "☁ 已同步"), el("span", "", `跨裝置共用（私密 Gist）· ${W.syncedAt ? W.syncedAt.toTimeString().slice(0, 5) : ""}`));
+  }
+  const b = el("button", "ghost act", ghTok() ? "同步設定" : "設定跨裝置同步"); b.type = "button";
+  b.addEventListener("click", () => { $("#w-setup").hidden = !$("#w-setup").hidden; });
+  box.appendChild(b);
+}
+
+/* ---- 多組清單 ---- */
+function renderLists() {
+  const box = $("#w-lists"), s = W.doc[MARKET];
+  box.innerHTML = "";
+  s.lists.forEach((l, i) => {
+    const c = el("button", "chip"); c.type = "button"; c.setAttribute("aria-pressed", String(i === s.active));
+    c.append(l.name, el("span", "n", String(l.codes.length)));
+    c.addEventListener("click", () => { if (i === s.active) return; wCur().codes = W.list; s.active = i; W.list = wCur().codes; wSave(); renderWatch(); });
+    box.appendChild(c);
+  });
+  const mk = (txt, fn, title) => { const b = el("button", "ghost act", txt); b.type = "button"; if (title) b.title = title; b.addEventListener("click", fn); box.appendChild(b); return b; };
+  if (s.lists.length < W_MAX) mk("＋ 新增清單", () => {
+    const name = prompt("新清單名稱", `清單 ${s.lists.length + 1}`); if (name == null) return;
+    wCur().codes = W.list; s.lists.push({ name: name.trim().slice(0, 20) || `清單 ${s.lists.length + 1}`, codes: [] });
+    s.active = s.lists.length - 1; W.list = wCur().codes; wSave(); renderWatch();
+  }, `每個市場最多 ${W_MAX} 組`);
+  mk("重新命名", () => {
+    const name = prompt("清單名稱", wCur().name); if (name == null || !name.trim()) return;
+    wCur().name = name.trim().slice(0, 20); wSave(); renderWatch();
+  });
+  if (s.lists.length > 1) {
+    const del = mk("刪除這組", () => {
+      if (!del.dataset.armed) { del.dataset.armed = "1"; del.textContent = "再按一次確認刪除"; setTimeout(() => { del.textContent = "刪除這組"; delete del.dataset.armed; }, 3000); return; }
+      s.lists.splice(s.active, 1); s.active = Math.max(0, s.active - 1); W.list = wCur().codes; wSave(); renderWatch();
+    });
+  }
+}
 const wNorm = s => String(s || "").trim().toUpperCase();
 
 // 族群排名：同類型族群依「成分股 RS 評等中位數」排序（同分看 20 日 RS），PR = 贏過的族群比例
@@ -1127,8 +1297,38 @@ function wPick(i) {
 
 function wInit() {
   if (W.init) return; W.init = true;
-  W.key = "watchlist_" + MARKET;
   wIndexGroups(); wLoad();
+  wSyncStatus(); wSyncPull(true);
+  // 回到這個分頁時，抓另一台裝置的修改
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) wSyncPull(); });
+  $("#w-token").value = ghTok() ? "••••••••（已設定）" : "";
+  $("#w-token").addEventListener("focus", e => { if (ghTok()) e.target.value = ""; });
+  $("#w-token-save").addEventListener("click", async () => {
+    const v = $("#w-token").value.trim();
+    if (!/^(github_pat_|ghp_)/.test(v)) { $("#w-msg").textContent = "token 格式不對，應該是 github_pat_ 開頭。"; return; }
+    ls.set("gh_watch_token", v); ls.set("gh_watch_gist", null);
+    try {
+      wSyncStatus("連線中…");
+      const remote = await gistPull();        // 有既有清單：把這台的併進去（同名清單合併代號，其餘補在後面，最多 5 組）
+      ["tw", "us"].forEach(m => {
+        const R = remote[m], L = W.doc[m];
+        L.lists.forEach(l => {
+          if (!l.codes.length) return;
+          const same = R.lists.find(x => x.name === l.name);
+          if (same) l.codes.forEach(c => { if (!same.codes.includes(c)) same.codes.push(c); });
+          else if (R.lists.length < W_MAX) R.lists.push({ name: l.name, codes: l.codes.slice() });
+        });
+      });
+      W.doc = remote; W.list = wCur().codes; wSave();
+      $("#w-setup").hidden = true; $("#w-token").value = "••••••••（已設定）";
+      $("#w-msg").textContent = "同步完成：這台裝置的清單已和雲端合併。";
+      renderWatch();
+    } catch (e) { wSyncStatus(null, e); }
+  });
+  $("#w-token-del").addEventListener("click", () => {
+    ls.set("gh_watch_token", null); ls.set("gh_watch_gist", null); $("#w-token").value = "";
+    $("#w-msg").textContent = "已移除這台裝置的 token，清單改為只存在這台裝置（雲端那份仍保留）。"; wSyncStatus();
+  });
   // 分享連結 ?w=代號,代號 → 併入清單後從網址移除
   const sp = new URLSearchParams(location.search), w = sp.get("w");
   if (w) {
@@ -1169,22 +1369,23 @@ function wInit() {
   $("#w-clear").addEventListener("click", e => {
     const b = e.currentTarget;
     if (!W.list.length) return;
-    if (b.dataset.armed) { W.list = []; wSave(); renderWatch(); b.textContent = "清空清單"; delete b.dataset.armed; return; }
+    if (b.dataset.armed) { W.list = []; wSave(); renderWatch(); b.textContent = "清空這組"; delete b.dataset.armed; return; }
     b.dataset.armed = "1"; b.textContent = "再按一次確認清空";
-    setTimeout(() => { b.textContent = "清空清單"; delete b.dataset.armed; }, 3000);
+    setTimeout(() => { b.textContent = "清空這組"; delete b.dataset.armed; }, 3000);
   });
   $("#w-help").textContent =
     "個股象限：強度 = RS評等（全市場百分位，≥ 50 為強），動能 = 20日RS評等 − 60日RS評等（≥ 0 代表短期比中期強）；" +
     "右上領先、左上改善、右下走弱、左下落後，與族群輪動圖同一套判讀。族群：細族群優先，股票屬於多個細族群時取成分股最多的那個，" +
     "沒有細族群時改用產業鏈。族群強度 = 成分股 RS 評等中位數；族群排名為同類型族群中的名次，PR = 贏過的族群比例。" +
-    "清單存在這台裝置的瀏覽器裡，換裝置請用「複製分享連結」。";
+    `每個市場最多 ${W_MAX} 組清單。設定同步後，所有裝置共用同一份（存在你 GitHub 帳號下的私密 Gist）；要給別人看請用「複製分享連結」。`;
 }
 
 function renderWatch() {
   if (!DATA) return;
   wInit();
+  renderLists();
   const rows = W.list.map(wRow);
-  $("#w-count").textContent = `共 ${W.list.length} 檔　·　資料日 ${DATA.asof}`;
+  $("#w-count").textContent = `「${wCur().name}」共 ${W.list.length} 檔　·　資料日 ${DATA.asof}`;
   const tb = $("#w-table"); tb.innerHTML = "";
   if (!rows.length) {
     tb.innerHTML = "<tbody><tr><td class='txt muted'>清單是空的。在上方輸入代號或名稱，從下拉選單點選加入；也可以一次貼上多檔，用逗號或空白分隔後按 Enter。</td></tr></tbody>";
