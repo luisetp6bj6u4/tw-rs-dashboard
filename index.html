@@ -217,6 +217,29 @@
   #t30-table tr.t30-why td { white-space: normal; text-align: left; color: var(--text-secondary);
                              background: var(--surface-2); font-size: 13px; }
   #t30-table td.tagcell { white-space: normal; min-width: 150px; text-align: left; }
+  /* 👀 觀察清單 */
+  .w-add { position: relative; flex: 1 1 280px; max-width: 420px; }
+  .w-add input { width: 100%; }
+  .w-sugg { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 20; margin: 0; padding: 4px;
+            list-style: none; background: var(--surface-1); border: 1px solid var(--line); border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0,0,0,.14); max-height: 320px; overflow-y: auto; }
+  .w-sugg[hidden] { display: none; }
+  .w-sugg li { padding: 6px 10px; border-radius: 7px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+  .w-sugg li.on, .w-sugg li:hover { background: var(--surface-2); }
+  .w-sugg li .c { font-weight: 650; font-variant-numeric: tabular-nums; min-width: 52px; }
+  .w-sugg li .s { color: var(--text-muted); font-size: 12px; margin-left: auto; white-space: nowrap; }
+  .w-sugg li.in { opacity: .5; }
+  .quad { display: inline-block; padding: 1px 8px; border-radius: 6px; font-size: 12px; font-weight: 650; }
+  .quad.領先 { background: var(--q-lead); } .quad.改善 { background: var(--q-improve); }
+  .quad.走弱 { background: var(--q-weaken); } .quad.落後 { background: var(--q-lag); }
+  #w-table td.why { white-space: normal; min-width: 200px; max-width: 280px; text-align: left; font-size: 12.5px; color: var(--text-secondary); }
+  #w-table td.grp { white-space: normal; min-width: 120px; text-align: left; }
+  #w-table th:first-child, #w-table td:first-child { position: sticky; left: 0; background: var(--surface-1); z-index: 1; }
+  #w-table thead th:first-child { background: var(--surface-2); z-index: 2; }
+  #w-table td:first-child { max-width: 170px; overflow: hidden; text-overflow: ellipsis; }
+  #w-table .x { border: 0; background: none; cursor: pointer; color: var(--text-muted); font-size: 16px; padding: 0 4px; }
+  #w-table .x:hover { color: var(--up); }
+  #w-msg:empty { display: none; }
   footer { margin-top: 36px; color: var(--text-muted); font-size: 12px; }
   @media (max-width: 640px) {
     .wrap { padding: 14px 12px 48px; }
@@ -255,6 +278,7 @@
     <button role="tab" data-tab="link" aria-selected="false">台美連動</button>
     <button role="tab" data-tab="ic" aria-selected="false">因子檢定</button>
     <button role="tab" data-tab="top30" aria-selected="false" id="tab-btn-top30">⚡ 台股動能 Top30 每日分層分析</button>
+    <button role="tab" data-tab="watch" aria-selected="false">👀 觀察清單</button>
   </nav>
 
   <section id="tab-rrg">
@@ -374,6 +398,22 @@
     </p>
   </section>
 
+  <section id="tab-watch" hidden>
+    <div class="controls">
+      <div class="w-add">
+        <input id="w-q" type="search" autocomplete="off" spellcheck="false" placeholder="輸入代號或名稱…" aria-label="新增股票"
+               role="combobox" aria-expanded="false" aria-controls="w-sugg">
+        <ul class="w-sugg" id="w-sugg" role="listbox" hidden></ul>
+      </div>
+      <button class="ghost" id="w-share" type="button" title="複製含清單的網址，在其他裝置開啟即可匯入">複製分享連結</button>
+      <button class="ghost" id="w-clear" type="button">清空清單</button>
+      <span class="muted" id="w-count"></span>
+    </div>
+    <p class="note" id="w-msg"></p>
+    <div class="tablewrap"><table id="w-table"></table></div>
+    <p class="note muted" id="w-help"></p>
+  </section>
+
   <footer>
     資料由 GitHub Actions 每個交易日盤後自動更新。本頁僅為量化統計結果，不構成投資建議。
   </footer>
@@ -400,10 +440,11 @@ $("#tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-tab]");
   if (!b) return;
   for (const t of $("#tabs").children) t.setAttribute("aria-selected", String(t === b));
-  for (const id of ["rrg", "groups", "stocks", "link", "ic", "top30"])
+  for (const id of ["rrg", "groups", "stocks", "link", "ic", "top30", "watch"])
     $("#tab-" + id).hidden = id !== b.dataset.tab;
   if (b.dataset.tab === "rrg") drawRRG();
   if (b.dataset.tab === "top30") loadTop30();
+  if (b.dataset.tab === "watch") renderWatch();
 });
 
 /* ---------- 表格 ---------- */
@@ -983,6 +1024,227 @@ function renderTop30Table() {
   tb.appendChild(body);
 }
 
+/* ---------- 👀 觀察清單（存在這台裝置的瀏覽器；台股、美股各一份）---------- */
+const W = { key: "", list: [], sort: null, asc: false, hi: -1, sugg: [], byCode: {}, grp: {}, rank: {}, rrg: {}, init: false };
+const wLoad = () => { try { W.list = JSON.parse(localStorage.getItem(W.key) || "[]").filter(x => typeof x === "string"); } catch (e) { W.list = W.list || []; } };
+const wSave = () => { try { localStorage.setItem(W.key, JSON.stringify(W.list)); } catch (e) { /* 無痕模式等：只存在這次瀏覽 */ } };
+const wNorm = s => String(s || "").trim().toUpperCase();
+
+// 族群排名：同類型族群依「成分股 RS 評等中位數」排序（同分看 20 日 RS），PR = 贏過的族群比例
+function wIndexGroups() {
+  W.byCode = {}; DATA.stocks.forEach(r => { W.byCode[wNorm(r["代碼"])] = r; });
+  W.grp = {}; W.rank = {}; W.rrg = {};
+  (DATA.rrg || []).forEach(r => { W.rrg[r["類型"] + "／" + r["族群"]] = r; });
+  const byType = {};
+  (DATA.groups || []).forEach(g => { W.grp[g["類型"] + "／" + g["族群"]] = g; (byType[g["類型"]] = byType[g["類型"]] || []).push(g); });
+  Object.values(byType).forEach(arr => {
+    arr.sort((a, b) => (b["成分股RS評等中位數"] ?? -1) - (a["成分股RS評等中位數"] ?? -1) || (b["20日RS(%)"] ?? -99) - (a["20日RS(%)"] ?? -99));
+    arr.forEach((g, i) => { W.rank[g["類型"] + "／" + g["族群"]] = { rank: i + 1, n: arr.length,
+      pr: arr.length > 1 ? Math.round((arr.length - 1 - i) / (arr.length - 1) * 100) : 100 }; });
+  });
+}
+
+// 個股只挑一個族群：細族群優先（多個時取成分股最多的），沒有就用產業鏈，再沒有用官方產業
+function wGroupOf(r) {
+  const subs = subsOf(r).map(s => W.grp["細族群／" + s]).filter(Boolean);
+  if (subs.length) return subs.sort((a, b) => b["成分股數"] - a["成分股數"])[0];
+  return W.grp["產業鏈／" + r["產業鏈"]] || W.grp["官方產業／" + (r["官方產業別"] ?? r["官方產業"])] || null;
+}
+
+// 個股象限：強度 = RS評等（全市場百分位，50 為中線）；動能 = 20日RS評等 − 60日RS評等（短期是否比中期更強）
+function wQuad(r) {
+  const rs = r["RS評等"], m = (r["20日RS評等"] ?? NaN) - (r["60日RS評等"] ?? NaN);
+  if (rs == null || isNaN(m)) return { q: "", txt: "資料不足" };
+  const q = rs >= 50 ? (m >= 0 ? "領先" : "走弱") : (m >= 0 ? "改善" : "落後");
+  const lv = rs >= 90 ? "極強" : rs >= 80 ? "強勢" : rs >= 50 ? "中等偏強" : rs >= 30 ? "偏弱" : "弱勢";
+  const base = { 領先: `${lv}且短期動能仍在升溫`, 走弱: `${lv}，但短期動能落後中期，留意轉弱`,
+                 改善: `${lv}，短期動能回升中，觀察能否翻正`, 落後: `${lv}且短期動能續弱，暫避` }[q];
+  const s = r["RS線斜率(%/日)"], r2 = r["RS線R²"], add = [];
+  if (r["RS線60日新高"]) add.push("RS線創 60 日新高");
+  if ((s ?? 0) > 3 || (r["20日RS(%)"] ?? 0) > 80) add.push("短線噴出、追價風險高");
+  else if (s != null && r2 != null && r2 >= 0.7) add.push(s > 0 ? `RS線穩定上升（R² ${r2.toFixed(2)}）` : `RS線穩定下滑（R² ${r2.toFixed(2)}）`);
+  if ((r["5日RS(%)"] ?? 0) < 0 && (r["收盤強弱度(%)"] ?? 100) < 30) add.push("近 5 日拉回");
+  return { q, m, txt: base + (add.length ? "；" + add.join("、") : "") };
+}
+
+function wRow(code) {
+  const r = W.byCode[code];
+  if (!r) return { code, missing: true };
+  const g = wGroupOf(r), gk = g ? g["類型"] + "／" + g["族群"] : "", rk = W.rank[gk] || {}, rr = W.rrg[gk] || {};
+  const qd = wQuad(r);
+  return { code, r, 名稱: r["股票名稱"], 收盤價: r["收盤價"], RS評等: r["RS評等"], "20日RS評等": r["20日RS評等"], "60日RS評等": r["60日RS評等"],
+    "5日RS(%)": r["5日RS(%)"], "20日RS(%)": r["20日RS(%)"], 象限: qd.q, 動能差: qd.m, 判讀: qd.txt,
+    族群: g ? g["族群"] : "", 族群類型: g ? g["類型"] : "", 族群強度: g ? g["成分股RS評等中位數"] : null,
+    "族群20日RS(%)": g ? g["20日RS(%)"] : null, 族群PR: rk.pr ?? null, 族群名次: rk.rank, 族群數: rk.n,
+    族群象限: rr["象限"] || "", 族群判讀: rr["判讀"] || "" };
+}
+
+function wAdd(codes) {
+  let added = 0;
+  codes.forEach(c => { c = wNorm(c); if (W.byCode[c] && !W.list.includes(c)) { W.list.push(c); added++; } });
+  if (added) { wSave(); renderWatch(); }
+  return added;
+}
+
+// 輸入比對：代號開頭相符優先，其次名稱包含；美股不分大小寫
+function wMatch(q) {
+  q = q.trim(); if (!q) return [];
+  const Q = q.toUpperCase(), out = [];
+  for (const r of DATA.stocks) {
+    const c = wNorm(r["代碼"]), n = String(r["股票名稱"] || ""), N = n.toUpperCase();
+    const score = c === Q ? 0 : c.startsWith(Q) ? 1 : N.startsWith(Q) ? 2 : N.includes(Q) ? 3 : 9;
+    if (score < 9) out.push([score, r["日均成交值(億)"] ?? r["20日均成交額(百萬美元)"] ?? 0, r]);
+  }
+  // 同樣相符程度時，成交值大的排前面（例如輸入 NV 先出現 NVDA）
+  return out.sort((a, b) => a[0] - b[0] || b[1] - a[1]).slice(0, 8).map(x => x[2]);
+}
+
+function wShowSugg() {
+  const box = $("#w-sugg"), q = $("#w-q").value;
+  W.sugg = wMatch(q); W.hi = W.sugg.length ? 0 : -1;
+  box.innerHTML = "";
+  W.sugg.forEach((r, i) => {
+    const c = wNorm(r["代碼"]);
+    const li = el("li", (i === W.hi ? "on" : "") + (W.list.includes(c) ? " in" : ""));
+    li.setAttribute("role", "option");
+    li.append(el("span", "c", r["代碼"]), el("span", "", r["股票名稱"]),
+              el("span", "s", (W.list.includes(c) ? "已在清單 · " : "") + (r["細族群"] || r["產業鏈"] || "") + (r["RS評等"] != null ? ` · RS ${r["RS評等"]}` : "")));
+    li.addEventListener("mousedown", e => { e.preventDefault(); wPick(i); });
+    box.appendChild(li);
+  });
+  if (q.trim() && !W.sugg.length) box.appendChild(el("li", "s", "找不到符合的股票（只能加入本站追蹤的股票）"));
+  box.hidden = !q.trim();
+  $("#w-q").setAttribute("aria-expanded", String(!box.hidden));
+}
+
+function wPick(i) {
+  const r = W.sugg[i]; if (!r) return;
+  const c = wNorm(r["代碼"]);
+  $("#w-msg").textContent = W.list.includes(c) ? `${r["代碼"]} ${r["股票名稱"]} 已在清單中。` : "";
+  wAdd([c]);
+  $("#w-q").value = ""; wShowSugg(); $("#w-q").focus();
+}
+
+function wInit() {
+  if (W.init) return; W.init = true;
+  W.key = "watchlist_" + MARKET;
+  wIndexGroups(); wLoad();
+  // 分享連結 ?w=代號,代號 → 併入清單後從網址移除
+  const sp = new URLSearchParams(location.search), w = sp.get("w");
+  if (w) {
+    const codes = w.split(/[,\s]+/).filter(Boolean), n = wAdd(codes);
+    $("#w-msg").textContent = `已從分享連結匯入 ${n} 檔（共 ${codes.length} 檔，其餘已在清單或不在追蹤範圍）。`;
+    sp.delete("w"); history.replaceState(null, "", location.pathname + (sp.toString() ? "?" + sp : ""));
+    for (const t of $("#tabs").children) if (t.dataset.tab === "watch") t.click();
+  }
+  const q = $("#w-q");
+  q.placeholder = MARKET === "us" ? "輸入英文代號或公司名，例如 NVDA" : "輸入代號或中文名稱，例如 2330 或 台積電";
+  q.addEventListener("input", wShowSugg);
+  q.addEventListener("blur", () => setTimeout(() => { $("#w-sugg").hidden = true; q.setAttribute("aria-expanded", "false"); }, 120));
+  q.addEventListener("focus", () => { if (q.value.trim()) wShowSugg(); });
+  q.addEventListener("keydown", e => {
+    const items = [...$("#w-sugg").querySelectorAll("li[role=option]")];
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      if (!items.length) return; e.preventDefault();
+      W.hi = (W.hi + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+      items.forEach((li, i) => li.classList.toggle("on", i === W.hi)); items[W.hi].scrollIntoView({ block: "nearest" });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const parts = q.value.split(/[,，、\s]+/).filter(Boolean);
+      if (parts.length > 1) {             // 一次貼上多檔：逐一比對代號或完全相同的名稱
+        const hit = [], miss = [];
+        parts.forEach(p => { const m = wMatch(p)[0]; (m && (wNorm(m["代碼"]) === wNorm(p) || m["股票名稱"] === p) ? hit : miss).push(m ? wNorm(m["代碼"]) : p); });
+        const n = wAdd(hit);
+        $("#w-msg").textContent = `加入 ${n} 檔` + (miss.length ? `；找不到：${miss.join("、")}` : "") + "。";
+        q.value = ""; wShowSugg();
+      } else if (W.hi >= 0) wPick(W.hi);
+    } else if (e.key === "Escape") { $("#w-sugg").hidden = true; }
+  });
+  $("#w-share").addEventListener("click", async () => {
+    if (!W.list.length) { $("#w-msg").textContent = "清單是空的。"; return; }
+    const url = `${location.origin}${location.pathname}?${MARKET === "us" ? "m=us&" : ""}w=${W.list.join(",")}`;
+    try { await navigator.clipboard.writeText(url); $("#w-msg").textContent = "已複製分享連結，在其他裝置開啟即可匯入這份清單。"; }
+    catch (e) { $("#w-msg").textContent = "請手動複製：" + url; }
+  });
+  $("#w-clear").addEventListener("click", e => {
+    const b = e.currentTarget;
+    if (!W.list.length) return;
+    if (b.dataset.armed) { W.list = []; wSave(); renderWatch(); b.textContent = "清空清單"; delete b.dataset.armed; return; }
+    b.dataset.armed = "1"; b.textContent = "再按一次確認清空";
+    setTimeout(() => { b.textContent = "清空清單"; delete b.dataset.armed; }, 3000);
+  });
+  $("#w-help").textContent =
+    "個股象限：強度 = RS評等（全市場百分位，≥ 50 為強），動能 = 20日RS評等 − 60日RS評等（≥ 0 代表短期比中期強）；" +
+    "右上領先、左上改善、右下走弱、左下落後，與族群輪動圖同一套判讀。族群：細族群優先，股票屬於多個細族群時取成分股最多的那個，" +
+    "沒有細族群時改用產業鏈。族群強度 = 成分股 RS 評等中位數；族群排名為同類型族群中的名次，PR = 贏過的族群比例。" +
+    "清單存在這台裝置的瀏覽器裡，換裝置請用「複製分享連結」。";
+}
+
+function renderWatch() {
+  if (!DATA) return;
+  wInit();
+  const rows = W.list.map(wRow);
+  $("#w-count").textContent = `共 ${W.list.length} 檔　·　資料日 ${DATA.asof}`;
+  const tb = $("#w-table"); tb.innerHTML = "";
+  if (!rows.length) {
+    tb.innerHTML = "<tbody><tr><td class='txt muted'>清單是空的。在上方輸入代號或名稱，從下拉選單點選加入；也可以一次貼上多檔，用逗號或空白分隔後按 Enter。</td></tr></tbody>";
+    return;
+  }
+  const cols = [
+    ["名稱", "股票", "txt"], ["RS評等", "個股強度"], ["動能差", "20/60日評等"],
+    ["5日RS(%)", "5日RS%", "sign"], ["20日RS(%)", "20日RS%", "sign"], ["象限", "個股象限", "txt"], ["判讀", "判讀", "txt"],
+    ["族群", "所在族群", "txt"], ["族群強度", "族群強度"], ["族群PR", "族群排名(PR)"],
+    ["族群象限", "族群象限", "txt"], ["", "", "txt"],
+  ];
+  if (W.sort) {
+    const k = W.sort, a = W.asc ? 1 : -1;
+    rows.sort((x, y) => {
+      const u = x[k], v = y[k];
+      if (u == null || u === "") return 1; if (v == null || v === "") return -1;
+      return typeof u === "number" ? (u - v) * a : String(u).localeCompare(String(v), "zh-Hant") * a;
+    });
+  }
+  const thead = el("thead"), hr = el("tr");
+  cols.forEach(([k, label, kind]) => {
+    const th = el("th", kind === "txt" ? "txt" : "", label + (W.sort === k && k ? (W.asc ? " ▲" : " ▼") : ""));
+    if (k) th.addEventListener("click", () => { W.asc = W.sort === k ? !W.asc : false; W.sort = k; renderWatch(); });
+    else th.style.cursor = "default";
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr); tb.appendChild(thead);
+  const body = el("tbody");
+  const num = (v, d, sign) => { const td = el("td", "num", v == null ? "–" : (sign && v > 0 ? "+" : "") + v.toFixed(d));
+    if (sign && v > 0) td.classList.add("pos"); if (sign && v < 0) td.classList.add("neg"); return td; };
+  rows.forEach(x => {
+    const tr = el("tr");
+    const rm = el("button", "x", "×"); rm.type = "button"; rm.title = "從清單移除";
+    rm.addEventListener("click", () => { W.list = W.list.filter(c => c !== x.code); wSave(); renderWatch(); });
+    if (x.missing) {
+      tr.append(el("td", "txt", x.code));
+      const td = el("td", "txt muted", "今日不在資料範圍（可能流動性不足而未入選，明天會再比對）"); td.colSpan = cols.length - 2;
+      const tx = el("td", "txt"); tx.appendChild(rm);
+      tr.append(td, tx); body.appendChild(tr); return;
+    }
+    const nm = el("td", "txt"); nm.title = `${x.code} ${x.名稱 || ""}`;
+    nm.append(el("b", "", x.code), " " + (x.名稱 || ""));
+    tr.append(nm, num(x.RS評等, 0),
+              el("td", "num", `${x["20日RS評等"] ?? "–"} / ${x["60日RS評等"] ?? "–"}`),
+              num(x["5日RS(%)"], 1, true), num(x["20日RS(%)"], 1, true));
+    const qd = el("td", "txt"); if (x.象限) qd.appendChild(el("span", "quad " + x.象限, x.象限)); else qd.textContent = "–";
+    tr.append(qd, el("td", "why", x.判讀));
+    const gd = el("td", "grp", x.族群 || "–"); if (x.族群類型 && x.族群類型 !== "細族群") gd.appendChild(el("span", "muted", `（${x.族群類型}）`));
+    const gs = num(x.族群強度, 1), g20 = x["族群20日RS(%)"];
+    if (g20 != null) { const s = el("div", g20 > 0 ? "pos" : g20 < 0 ? "neg" : "", `20日 ${g20 > 0 ? "+" : ""}${g20.toFixed(1)}%`); s.style.fontSize = "11.5px"; gs.appendChild(s); }
+    tr.append(gd, gs);
+    tr.appendChild(el("td", "num", x.族群PR == null ? "–" : `#${x.族群名次}/${x.族群數} · PR ${x.族群PR}`));
+    const gq = el("td", "txt"); if (x.族群象限) { gq.appendChild(el("span", "quad " + x.族群象限, x.族群象限)); if (x.族群判讀) gq.append(" " + x.族群判讀); } else gq.textContent = "–";
+    const tx = el("td", "txt"); tx.appendChild(rm);
+    tr.append(gq, tx);
+    body.appendChild(tr);
+  });
+  tb.appendChild(body);
+}
+
 // 一檔股票可能屬於多個細族群（例如「IC設計、矽智財IP」），拆開來比對
 const subsOf = r => String(r["細族群"] || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean);
 
@@ -1099,6 +1361,7 @@ async function boot() {
   initAnim();
   drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC();
   renderLink();
+  if (new URLSearchParams(location.search).get("w")) renderWatch();
   addEventListener("resize", () => drawRRG());
 }
 boot();
