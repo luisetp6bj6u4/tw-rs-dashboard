@@ -25,6 +25,7 @@
     --q-improve: rgba(42,120,214,.09);
     --q-weaken: rgba(235,104,52,.09);
     --q-lag: rgba(120,118,110,.09);
+    --tier-a: #1b8f63; --tier-b: #2a78d6; --tier-c: #c4552a;
   }
   :root[data-theme="dark"], :root:not([data-theme="light"]) {
     --shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.05);
@@ -192,6 +193,30 @@
   .pos { color: var(--up); } .neg { color: var(--down); }
   .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2); font-size: 12px; }
   .muted { color: var(--text-muted); }
+  /* ⚡ 動能 Top30 */
+  .t30-hl { margin: 0; padding-left: 20px; }
+  .t30-hl li { margin: 4px 0; }
+  .t30-picks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+  .t30-pick { background: var(--surface-1); border: 1px solid var(--line); border-left: 4px solid var(--tier-a);
+              border-radius: 12px; padding: 10px 12px; }
+  .t30-pick b { font-size: 15px; }
+  .t30-pick p { margin: 6px 0 0; font-size: 13px; color: var(--text-secondary); }
+  .tier { display: inline-block; min-width: 22px; text-align: center; padding: 1px 7px; border-radius: 6px;
+          font-weight: 700; font-size: 12px; color: #fff; }
+  .tier.A { background: var(--tier-a); } .tier.B { background: var(--tier-b); } .tier.C { background: var(--tier-c); }
+  .chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .chips button { border: 1px solid var(--line); background: var(--surface-1); border-radius: 999px;
+                  padding: 3px 12px; cursor: pointer; font-size: 13px; }
+  .chips button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); border-color: var(--text-primary); }
+  .tag { display: inline-block; padding: 0 6px; margin: 1px 2px 1px 0; border-radius: 6px; font-size: 11.5px;
+         background: var(--surface-2); color: var(--text-secondary); }
+  .tag.good { background: var(--q-lead); color: var(--text-primary); }
+  .tag.warn { background: var(--q-weaken); color: var(--text-primary); }
+  .tag.new { background: var(--series-1); color: #fff; font-weight: 600; }
+  #t30-table tbody tr.t30-row { cursor: pointer; }
+  #t30-table tr.t30-why td { white-space: normal; text-align: left; color: var(--text-secondary);
+                             background: var(--surface-2); font-size: 13px; }
+  #t30-table td.tagcell { white-space: normal; min-width: 150px; text-align: left; }
   footer { margin-top: 36px; color: var(--text-muted); font-size: 12px; }
   @media (max-width: 640px) {
     .wrap { padding: 14px 12px 48px; }
@@ -229,6 +254,7 @@
     <button role="tab" data-tab="stocks" aria-selected="false">個股</button>
     <button role="tab" data-tab="link" aria-selected="false">台美連動</button>
     <button role="tab" data-tab="ic" aria-selected="false">因子檢定</button>
+    <button role="tab" data-tab="top30" aria-selected="false" id="tab-btn-top30">⚡ 台股動能 Top30 每日分層分析</button>
   </nav>
 
   <section id="tab-rrg">
@@ -319,6 +345,35 @@
     </p>
   </section>
 
+  <section id="tab-top30" hidden>
+    <div class="controls">
+      <label class="muted">資料日 <select id="t30-date"></select></label>
+      <span class="chips" id="t30-tier" role="group" aria-label="層級">
+        <button type="button" data-t="" aria-pressed="true">全部</button>
+        <button type="button" data-t="A" aria-pressed="false">A 優先研究</button>
+        <button type="button" data-t="B" aria-pressed="false">B 觀察</button>
+        <button type="button" data-t="C" aria-pressed="false">C 不建議追價</button>
+      </span>
+      <label class="muted"><input id="t30-new" type="checkbox"> 只看新進榜</label>
+    </div>
+    <p class="note" id="t30-head">載入中…</p>
+    <div class="tiles" id="t30-tiles"></div>
+    <h2>今日重點</h2>
+    <div class="card"><ul class="t30-hl" id="t30-hl"></ul></div>
+    <h2>優先研究（A 層）</h2>
+    <div class="t30-picks" id="t30-picks"></div>
+    <h2>Top30 分層總表</h2>
+    <p class="note muted" style="margin:0 0 8px">點任一列展開判讀理由。層級：A 趨勢健康＋品質佳＋有籌碼支撐；B 趨勢穩但基本面或籌碼普通、拉回中或品質待補；C 過熱噴出、剛轉強、獲利偏弱或無法人參與。</p>
+    <div class="tablewrap"><table id="t30-table"></table></div>
+    <h2>跌出榜</h2>
+    <p class="note" id="t30-out"></p>
+    <p class="note muted">
+      判讀規則：斜率 &gt; 3%/日 或 20日RS &gt; 80% 為過熱；60日RS評等 &lt; 60 為剛轉強；5日RS &lt; 0 且收盤強弱度 &lt; 30 為拉回中；
+      20日法人集中度 ≥ 3% 或投信 20 日買超 ≥ 5 天為機構支撐；品質分數 ≥ 70 或 ◆ 為品質佳，剛好 60 代表 ROE &lt; 5% 被壓上限。
+      依收盤資料做事實篩選與規則判讀，不構成投資建議。
+    </p>
+  </section>
+
   <footer>
     資料由 GitHub Actions 每個交易日盤後自動更新。本頁僅為量化統計結果，不構成投資建議。
   </footer>
@@ -345,9 +400,10 @@ $("#tabs").addEventListener("click", e => {
   const b = e.target.closest("button[data-tab]");
   if (!b) return;
   for (const t of $("#tabs").children) t.setAttribute("aria-selected", String(t === b));
-  for (const id of ["rrg", "groups", "stocks", "link", "ic"])
+  for (const id of ["rrg", "groups", "stocks", "link", "ic", "top30"])
     $("#tab-" + id).hidden = id !== b.dataset.tab;
   if (b.dataset.tab === "rrg") drawRRG();
+  if (b.dataset.tab === "top30") loadTop30();
 });
 
 /* ---------- 表格 ---------- */
@@ -838,6 +894,95 @@ function renderIC() {
   ]);
 }
 
+/* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
+const T30 = { data: null, tier: "", init: false, cache: {} };
+const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高"]);
+const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱"]);
+const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+
+async function loadTop30(date) {
+  if (!T30.init) {
+    T30.init = true;
+    $("#t30-tier").addEventListener("click", e => {
+      const b = e.target.closest("button[data-t]"); if (!b) return;
+      T30.tier = b.dataset.t;
+      for (const x of $("#t30-tier").children) x.setAttribute("aria-pressed", String(x === b));
+      renderTop30Table();
+    });
+    $("#t30-new").addEventListener("input", renderTop30Table);
+    $("#t30-date").addEventListener("change", e => loadTop30(e.target.value));
+    try {
+      const idx = await (await fetch("data/top30/index.json", { cache: "no-store" })).json();
+      (idx.dates || []).slice().reverse().forEach(d => { const o = el("option", "", d); o.value = d; $("#t30-date").appendChild(o); });
+    } catch (e) { /* 還沒有歷史資料 */ }
+  } else if (!date && T30.data) return;
+  const url = date ? `data/top30/${date}.json` : "data/top30.json";
+  try {
+    T30.data = T30.cache[url] || (T30.cache[url] = await (await fetch(url, { cache: "no-store" })).json());
+  } catch (e) {
+    $("#t30-head").textContent = "Top30 資料尚未產生（台股盤後排程跑完後才會有）。";
+    return;
+  }
+  if (!$("#t30-date").options.length) {
+    const o = el("option", "", T30.data.asof); o.value = T30.data.asof; $("#t30-date").appendChild(o);
+  }
+  $("#t30-date").value = T30.data.asof;
+  renderTop30();
+}
+
+function renderTop30() {
+  const d = T30.data;
+  $("#t30-head").textContent = `資料日 ${d.asof}` + (d.prev_asof ? `（與 ${d.prev_asof} 比較）` : "") +
+    `　·　條件：${d.rules}；通過 ${d.passed} 檔。`;
+  const n = d.passed || 1, newN = d.items.filter(x => x["新進榜"]).length;
+  $("#t30-tiles").innerHTML = "";
+  [["通過檔數", d.passed], ["A 優先研究", d.tiers.A], ["B 觀察", d.tiers.B], ["C 不建議追價", d.tiers.C],
+   ["過熱比例", Math.round(d.overheat / n * 100) + "%"], ["新進榜", d.prev_asof ? newN : "–"], ["行情型態", d.mode]]
+    .forEach(([k, v]) => { const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v ?? "–")); $("#t30-tiles").appendChild(t); });
+  $("#t30-hl").innerHTML = "";
+  (d.highlights || []).forEach(h => $("#t30-hl").appendChild(el("li", "", h)));
+  $("#t30-picks").innerHTML = "";
+  if (!d.picks.length) $("#t30-picks").appendChild(el("p", "note", "今天沒有符合 A 層條件的股票。"));
+  d.picks.forEach(p => {
+    const c = el("div", "t30-pick");
+    c.append(el("b", "", `${p["代碼"]} ${p["股票名稱"]}`), el("span", "muted", `　${p["細族群"] || ""}`), el("p", "", p["理由"]));
+    $("#t30-picks").appendChild(c);
+  });
+  $("#t30-out").textContent = !d.prev_asof ? "（沒有前一日資料可比較）" :
+    d.out.length ? d.out.map(x => `${x["代碼"]} ${x["股票名稱"]}`).join("、") : "無";
+  renderTop30Table();
+}
+
+function renderTop30Table() {
+  const d = T30.data; if (!d) return;
+  const rows = d.items.filter(x => (!T30.tier || x["層級"] === T30.tier) && (!$("#t30-new").checked || x["新進榜"]));
+  const tb = $("#t30-table"); tb.innerHTML = "";
+  const cols = ["#", "股票", "細族群", "層級", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "籌碼", "標籤", "上榜"];
+  const thead = el("thead"), hr = el("tr");
+  cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 9 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
+  thead.appendChild(hr); tb.appendChild(thead);
+  const body = el("tbody");
+  if (!rows.length) { const r = el("tr"); r.appendChild(el("td", "txt muted", "沒有符合的資料")); body.appendChild(r); }
+  const num = (v, k, sign) => { const td = el("td", "num", v == null ? "–" : (sign && v > 0 ? "+" : "") + v.toFixed(k));
+    if (sign && v > 0) td.classList.add("pos"); if (sign && v < 0) td.classList.add("neg"); return td; };
+  rows.forEach(x => {
+    const r = el("tr", "t30-row");
+    r.append(el("td", "num", x["排名"]), el("td", "txt", `${x["代碼"]} ${x["股票名稱"]}`), el("td", "txt", x["細族群"] || ""));
+    const tt = el("td", "txt"); tt.appendChild(el("span", "tier " + x["層級"], x["層級"])); r.appendChild(tt);
+    r.append(num(x["RS評等"], 0), num(x["RS線斜率(%/日)"], 2), num(x["RS線R²"], 2), num(x["20日RS(%)"], 1, true),
+             num(x["品質分數"], 1), el("td", "txt", x["籌碼"] || ""));
+    const tg = el("td", "tagcell");
+    if (x["新進榜"]) tg.appendChild(el("span", "tag new", "NEW"));
+    (x["標籤"] || []).forEach(s => tg.appendChild(el("span", "tag" + (T30_GOOD.has(s) ? " good" : T30_WARN.has(s) ? " warn" : ""), s)));
+    r.append(tg, el("td", "num", x["連續上榜"] > 1 ? `${x["連續上榜"]} 天` : (x["新進榜"] ? "新" : "–")));
+    const why = el("tr", "t30-why"); why.hidden = true;
+    const wd = el("td", "", x["理由"]); wd.colSpan = cols.length; why.appendChild(wd);
+    r.addEventListener("click", () => { why.hidden = !why.hidden; r.classList.toggle("sel", !why.hidden); });
+    body.append(r, why);
+  });
+  tb.appendChild(body);
+}
+
 // 一檔股票可能屬於多個細族群（例如「IC設計、矽智財IP」），拆開來比對
 const subsOf = r => String(r["細族群"] || "").split(/[、,，]/).map(s => s.trim()).filter(Boolean);
 
@@ -891,6 +1036,7 @@ async function boot() {
   $(MARKET === "us" ? "#mkt-us" : "#mkt-tw").setAttribute("aria-current", "page");
   $("#s-trend-wrap").hidden = MARKET !== "us";
   $("#s-qual-wrap").hidden = MARKET === "us";
+  $("#tab-btn-top30").hidden = MARKET === "us";
   try {
     d = await (await fetch(MKT.data, { cache: "no-store" })).json();
   } catch (e) {
