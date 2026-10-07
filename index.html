@@ -357,7 +357,9 @@
     </div>
     <div class="tablewrap"><table id="stocks-table"></table></div>
     <p class="note muted">OBV 量能潮：上漲日加量、下跌日減量的累計值。OBV量能比 = 近 20 日 OBV 變化 ÷ 20 日總量（−100～+100，正值代表上漲日的量較多）；
-      OBV新高 = OBV 創 60 日新高；量先價行 = OBV 已創新高、股價仍在 60 日高點 3% 以下。各指標的預測力見「IC檢定」分頁。</p>
+      OBV新高 = OBV 創 60 日新高；量先價行 = OBV 已創新高、股價仍在 60 日高點 3% 以下。<br>
+      月營收（台股）：近3月營收年增 = 近 3 個月合計 vs 去年同期；營收加速 = 近 3 月年增 − 近 12 月年增（&gt; 0 代表成長加速）；
+      營收新高 = 單月營收創 12 個月新高。各指標的預測力見「IC檢定」分頁。</p>
   </section>
 
   <section id="tab-link" hidden>
@@ -896,6 +898,9 @@ function renderStocks() {
     { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
     { key: "OBV20日量能比(%)", d: 1, sign: true, label: "OBV量能比(%)" },
     { key: "OBV60日新高", text: true, label: "OBV新高" }, { key: "OBV量先價行", text: true, label: "量先價行" },
+    { key: "近3月營收年增(%)", d: 1, sign: true, label: "近3月營收年增(%)" },
+    { key: "營收年增加速(pp)", d: 1, sign: true, label: "營收加速(pp)" },
+    { key: "營收創12月新高", text: true, label: "營收新高" }, { key: "營收月份", text: true },
     { key: "20日外資集中度(%)", sign: true }, { key: "20日投信集中度(%)", sign: true },
     { key: "投信連買天數", d: 0 }, { key: "日均成交值(億)" },
   ]);
@@ -1241,6 +1246,8 @@ function wQuad(r) {
   const s = r["RS線斜率(%/日)"], r2 = r["RS線R²"], add = [];
   if (r["RS線60日新高"]) add.push("RS線創 60 日新高");
   if (r["OBV量先價行"]) add.push("OBV 先創新高、股價尚未跟上");
+  if (r["營收創12月新高"]) add.push(`${r["營收月份"] || ""} 營收創 12 個月新高`);
+  else if ((r["營收年增加速(pp)"] ?? 0) >= 10 && (r["近3月營收年增(%)"] ?? 0) > 0) add.push("營收成長加速");
   if ((s ?? 0) > 3 || (r["20日RS(%)"] ?? 0) > 80) add.push("短線噴出、追價風險高");
   else if (s != null && r2 != null && r2 >= 0.7) add.push(s > 0 ? `RS線穩定上升（R² ${r2.toFixed(2)}）` : `RS線穩定下滑（R² ${r2.toFixed(2)}）`);
   if ((r["5日RS(%)"] ?? 0) < 0 && (r["收盤強弱度(%)"] ?? 100) < 30) add.push("近 5 日拉回");
