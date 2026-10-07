@@ -349,12 +349,15 @@
       <label class="muted">RS評等 ≥ <input id="s-rs" type="number" min="1" max="99" value="1" style="width:64px"></label>
       <label class="muted"><input id="s-star" type="checkbox"> 只看 ⭐</label>
       <label class="muted"><input id="s-high" type="checkbox"> 只看 RS線新高</label>
+      <label class="muted" title="OBV 創 60 日新高，但收盤仍低於 60 日高點 3% 以上"><input id="s-obv" type="checkbox"> 只看 OBV量先價行</label>
       <label class="muted" id="s-trend-wrap" hidden><input id="s-trend" type="checkbox"> 只看趨勢模板</label>
       <label class="muted" id="s-qual-wrap" hidden title="RS評等 ≥ 80 且品質分數 ≥ 70">
         <input id="s-qual" type="checkbox"> 只看動能×品質 ◆</label>
       <span class="muted" id="s-count"></span>
     </div>
     <div class="tablewrap"><table id="stocks-table"></table></div>
+    <p class="note muted">OBV 量能潮：上漲日加量、下跌日減量的累計值。OBV量能比 = 近 20 日 OBV 變化 ÷ 20 日總量（−100～+100，正值代表上漲日的量較多）；
+      OBV新高 = OBV 創 60 日新高；量先價行 = OBV 已創新高、股價仍在 60 日高點 3% 以下。各指標的預測力見「IC檢定」分頁。</p>
   </section>
 
   <section id="tab-link" hidden>
@@ -877,6 +880,7 @@ function renderStocks() {
     (Number(r["RS評等"]) >= rs) &&
     (!star || r["動能精選"] === "⭐") &&
     (!high || r["RS線60日新高"] === "★") &&
+    (!$("#s-obv").checked || r["OBV量先價行"] === "✓") &&
     (!($("#s-trend") && $("#s-trend").checked) || r["趨勢模板"] === "✓") &&
     (!($("#s-qual") && $("#s-qual").checked) || r["動能×品質"] === "◆")
   ).sort((a, b) => (b["RS評等"] ?? 0) - (a["RS評等"] ?? 0));
@@ -890,6 +894,8 @@ function renderStocks() {
     { key: "收盤價" }, { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
     { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
     { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
+    { key: "OBV20日量能比(%)", d: 1, sign: true, label: "OBV量能比(%)" },
+    { key: "OBV60日新高", text: true, label: "OBV新高" }, { key: "OBV量先價行", text: true, label: "量先價行" },
     { key: "20日外資集中度(%)", sign: true }, { key: "20日投信集中度(%)", sign: true },
     { key: "投信連買天數", d: 0 }, { key: "日均成交值(億)" },
   ]);
@@ -904,7 +910,10 @@ const US_STOCK_COLS = [
   { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
   { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距52週高(%)" },
   { key: "趨勢模板", text: true }, { key: "50日上漲/下跌量比", label: "上漲/下跌量比" },
-  { key: "相對成交量" }, { key: "20日均成交額(百萬美元)", d: 0, label: "20日均成交額(百萬$)" },
+  { key: "相對成交量" },
+  { key: "OBV20日量能比(%)", d: 1, sign: true, label: "OBV量能比(%)" },
+  { key: "OBV60日新高", text: true, label: "OBV新高" }, { key: "OBV量先價行", text: true, label: "量先價行" },
+  { key: "20日均成交額(百萬美元)", d: 0, label: "20日均成交額(百萬$)" },
 ];
 
 /* ---------- 台美連動（兩個市場共用 data/link.json）---------- */
@@ -1231,6 +1240,7 @@ function wQuad(r) {
                  改善: `${lv}，短期動能回升中，觀察能否翻正`, 落後: `${lv}且短期動能續弱，暫避` }[q];
   const s = r["RS線斜率(%/日)"], r2 = r["RS線R²"], add = [];
   if (r["RS線60日新高"]) add.push("RS線創 60 日新高");
+  if (r["OBV量先價行"]) add.push("OBV 先創新高、股價尚未跟上");
   if ((s ?? 0) > 3 || (r["20日RS(%)"] ?? 0) > 80) add.push("短線噴出、追價風險高");
   else if (s != null && r2 != null && r2 >= 0.7) add.push(s > 0 ? `RS線穩定上升（R² ${r2.toFixed(2)}）` : `RS線穩定下滑（R² ${r2.toFixed(2)}）`);
   if ((r["5日RS(%)"] ?? 0) < 0 && (r["收盤強弱度(%)"] ?? 100) < 30) add.push("近 5 日拉回");
@@ -1556,7 +1566,7 @@ async function boot() {
     if (!a) return;
     $("#s-sub").value = a.textContent; renderStocks();
   });
-  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high", "#s-trend", "#s-qual"].forEach(s =>
+  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high", "#s-obv", "#s-trend", "#s-qual"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
 
   initAnim();
