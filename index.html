@@ -369,7 +369,9 @@
       營收新高 = 單月營收創 12 個月新高。各指標的預測力見「IC檢定」分頁。<br>
       Beta：近 120 日對大盤（台股加權指數、美股 SPY）的敏感度，1.5 代表大盤漲跌 1% 時平均漲跌 1.5%；台股含前一日大盤（Dimson 修正，避免小型股低估）。
       下檔Beta 只用大盤下跌的日子計算。α60 = 扣掉 Beta × 大盤後的 60 日累積超額報酬，α60評等為全候選池百分位（1–99）：
-      RS 評等高但 α60評等低，代表強勢主要來自高 Beta（大盤回檔時容易跌更多）。</p>
+      RS 評等高但 α60評等低，代表強勢主要來自高 Beta。<br>
+      長期回測（因子檢定分頁最下方）：美股 α 動能能在強勢股中再分出好壞，美股另有「RS+α評等」（RS 50% + α60 50%）；
+      台股 α 動能沒有額外貢獻，僅供參考。兩地的高 Beta 強勢股在回測期間都沒有比較容易回落。</p>
   </section>
 
   <section id="tab-link" hidden>
@@ -908,10 +910,13 @@ function renderRegime() {
   const g = DATA.regime || {};
   if (!g.state) return;
   const rec = { 多頭: "atk", 盤整: "true", 轉弱: "def" }[g.state];
+  // 美股長期回測支持 α 動能：「真強勢」固定標為回測推薦
+  const btRec = MARKET === "us" ? "true" : "";
   $("#regime-note").hidden = false;
   $("#regime-note").textContent = `盤勢（${MARKET === "us" ? "SPY" : "加權指數"} ${g.date || ""}）：${g.state}　·　${g.text || ""}`;
   for (const o of $("#s-preset").options)
-    if (o.value) o.textContent = o.textContent.replace(/　★目前盤勢建議$/, "") + (o.value === rec ? "　★目前盤勢建議" : "");
+    if (o.value) o.textContent = o.textContent.replace(/(　★目前盤勢建議|　✔回測推薦)+$/, "")
+      + (o.value === btRec ? "　✔回測推薦" : "") + (o.value === rec ? "　★目前盤勢建議" : "");
 }
 
 function renderStocks() {
@@ -960,7 +965,7 @@ const US_STOCK_COLS = [
   { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 }, { key: "收盤價", label: "收盤價(US$)" },
   { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
   { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
-  { key: "Beta" }, { key: "下檔Beta" }, { key: "α60評等", d: 0 }, { key: "α60(%)", d: 1, sign: true },
+  { key: "RS+α評等", d: 0 }, { key: "Beta" }, { key: "下檔Beta" }, { key: "α60評等", d: 0 }, { key: "α60(%)", d: 1, sign: true },
   { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距52週高(%)" },
   { key: "趨勢模板", text: true }, { key: "50日上漲/下跌量比", label: "上漲/下跌量比" },
   { key: "相對成交量" },
@@ -1065,7 +1070,7 @@ function renderBacktest() {
 /* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
 const T30 = { data: null, tier: "", init: false, cache: {} };
 const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高", "α確認", "低Beta強勢"]);
-const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱", "靠Beta撐", "高Beta"]);
+const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱"]);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
 async function loadTop30(date) {
