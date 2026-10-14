@@ -282,6 +282,7 @@
   </header>
 
   <div class="tiles" id="tiles"></div>
+  <p class="note" id="regime-note" hidden></p>
 
   <nav class="tabs" id="tabs" role="tablist">
     <button role="tab" data-tab="rrg" aria-selected="true">族群輪動</button>
@@ -351,6 +352,12 @@
       <label class="muted"><input id="s-high" type="checkbox"> 只看 RS線新高</label>
       <label class="muted" title="OBV 創 60 日新高，但收盤仍低於 60 日高點 3% 以上"><input id="s-obv" type="checkbox"> 只看 OBV量先價行</label>
       <label class="muted" id="s-trend-wrap" hidden><input id="s-trend" type="checkbox"> 只看趨勢模板</label>
+      <select id="s-preset" title="依 Beta／α 動能的快速篩選">
+        <option value="">快速篩選：無</option>
+        <option value="true">真強勢（RS ≥ 80 且 α60評等 ≥ 80）</option>
+        <option value="def">抗跌領導（Beta ≤ 0.9、下檔Beta ≤ 0.8、RS ≥ 80、R² ≥ 0.7）</option>
+        <option value="atk">高彈性攻擊（Beta ≥ 1.3、RS ≥ 90、族群在領先象限）</option>
+      </select>
       <label class="muted" id="s-qual-wrap" hidden title="RS評等 ≥ 80 且品質分數 ≥ 70">
         <input id="s-qual" type="checkbox"> 只看動能×品質 ◆</label>
       <span class="muted" id="s-count"></span>
@@ -359,7 +366,10 @@
     <p class="note muted">OBV 量能潮：上漲日加量、下跌日減量的累計值。OBV量能比 = 近 20 日 OBV 變化 ÷ 20 日總量（−100～+100，正值代表上漲日的量較多）；
       OBV新高 = OBV 創 60 日新高；量先價行 = OBV 已創新高、股價仍在 60 日高點 3% 以下。<br>
       月營收（台股）：近3月營收年增 = 近 3 個月合計 vs 去年同期；營收加速 = 近 3 月年增 − 近 12 月年增（&gt; 0 代表成長加速）；
-      營收新高 = 單月營收創 12 個月新高。各指標的預測力見「IC檢定」分頁。</p>
+      營收新高 = 單月營收創 12 個月新高。各指標的預測力見「IC檢定」分頁。<br>
+      Beta：近 120 日對大盤（台股加權指數、美股 SPY）的敏感度，1.5 代表大盤漲跌 1% 時平均漲跌 1.5%；台股含前一日大盤（Dimson 修正，避免小型股低估）。
+      下檔Beta 只用大盤下跌的日子計算。α60 = 扣掉 Beta × 大盤後的 60 日累積超額報酬，α60評等為全候選池百分位（1–99）：
+      RS 評等高但 α60評等低，代表強勢主要來自高 Beta（大盤回檔時容易跌更多）。</p>
   </section>
 
   <section id="tab-link" hidden>
@@ -384,6 +394,16 @@
       平均 IC 是因子排名與之後報酬排名的相關係數，0.03～0.05 屬實務可用；
       t 值已做重疊校正，|t| ≥ 2 才算統計顯著。回推期間有存活者偏誤，數字偏樂觀。
     </p>
+    <section id="bt-wrap" hidden>
+      <h2>α 動能／Beta 長期回測</h2>
+      <p class="note" id="bt-head"></p>
+      <div class="tiles" id="bt-tiles"></div>
+      <h3 class="subhead">各因子 IC（之後 20 日）：全期與分盤勢</h3>
+      <div class="tablewrap"><table id="bt-ic"></table></div>
+      <h3 class="subhead">關鍵比較</h3>
+      <div class="tablewrap"><table id="bt-cmp"></table></div>
+      <p class="note muted" id="bt-note"></p>
+    </section>
   </section>
 
   <section id="tab-top30" hidden>
@@ -864,9 +884,34 @@ function renderGroups() {
   table($("#groups-table"), rows, [
     { key: "類型", text: true }, { key: "族群", text: true }, { key: "成分股數", d: 0 },
     { key: "信賴度", text: true }, { key: "成分股RS評等中位數", d: 0 }, { key: "強勢股比例(%)", d: 0 },
+    { key: "成分股Beta中位數", label: "Beta中位數" },
     { key: "當日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
     { key: "20日RS(%)", sign: true }, { key: "60日RS(%)", sign: true },
   ]);
+}
+
+// Beta／α 快速篩選；「高彈性攻擊」需要個股任一細族群在 RRG 領先象限
+let RRGQ = null;
+function presetOk(r, p) {
+  if (!p) return true;
+  const rs = r["RS評等"] ?? 0, bt = r["Beta"], bd = r["下檔Beta"], a = r["α60評等"];
+  if (p === "true") return rs >= 80 && (a ?? 0) >= 80;
+  if (p === "def") return rs >= 80 && bt != null && bt <= 0.9 && bd != null && bd <= 0.8 && (r["RS線R²"] ?? 0) >= 0.7;
+  if (p === "atk") {
+    if (!RRGQ) { RRGQ = {}; (DATA.rrg || []).forEach(g => { RRGQ[g["類型"] + "／" + g["族群"]] = g["象限"]; }); }
+    return rs >= 90 && bt != null && bt >= 1.3 && subsOf(r).some(s => RRGQ["細族群／" + s] === "領先");
+  }
+  return true;
+}
+
+function renderRegime() {
+  const g = DATA.regime || {};
+  if (!g.state) return;
+  const rec = { 多頭: "atk", 盤整: "true", 轉弱: "def" }[g.state];
+  $("#regime-note").hidden = false;
+  $("#regime-note").textContent = `盤勢（${MARKET === "us" ? "SPY" : "加權指數"} ${g.date || ""}）：${g.state}　·　${g.text || ""}`;
+  for (const o of $("#s-preset").options)
+    if (o.value) o.textContent = o.textContent.replace(/　★目前盤勢建議$/, "") + (o.value === rec ? "　★目前盤勢建議" : "");
 }
 
 function renderStocks() {
@@ -884,7 +929,8 @@ function renderStocks() {
     (!high || r["RS線60日新高"] === "★") &&
     (!$("#s-obv").checked || r["OBV量先價行"] === "✓") &&
     (!($("#s-trend") && $("#s-trend").checked) || r["趨勢模板"] === "✓") &&
-    (!($("#s-qual") && $("#s-qual").checked) || r["動能×品質"] === "◆")
+    (!($("#s-qual") && $("#s-qual").checked) || r["動能×品質"] === "◆") &&
+    presetOk(r, $("#s-preset").value)
   ).sort((a, b) => (b["RS評等"] ?? 0) - (a["RS評等"] ?? 0));
   $("#s-count").textContent = `${rows.length} 檔（顯示前 300）`;
   table($("#stocks-table"), rows.slice(0, 300), MARKET === "us" ? US_STOCK_COLS : [
@@ -895,6 +941,7 @@ function renderStocks() {
     { key: "品質分數", d: 0 }, { key: "F-Score", d: 0 },
     { key: "收盤價" }, { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
     { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
+    { key: "Beta" }, { key: "下檔Beta" }, { key: "α60評等", d: 0 }, { key: "α60(%)", d: 1, sign: true },
     { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距200日高(%)" },
     { key: "OBV20日量能比(%)", d: 1, sign: true, label: "OBV量能比(%)" },
     { key: "OBV60日新高", text: true, label: "OBV新高" }, { key: "OBV量先價行", text: true, label: "量先價行" },
@@ -913,6 +960,7 @@ const US_STOCK_COLS = [
   { key: "RS評等", d: 0 }, { key: "20日RS評等", d: 0 }, { key: "收盤價", label: "收盤價(US$)" },
   { key: "20日RS(%)", sign: true }, { key: "5日RS(%)", sign: true },
   { key: "RS線斜率(%/日)", d: 3, sign: true }, { key: "RS線R²" },
+  { key: "Beta" }, { key: "下檔Beta" }, { key: "α60評等", d: 0 }, { key: "α60(%)", d: 1, sign: true },
   { key: "RS線60日新高", text: true, label: "RS新高" }, { key: "距52週高(%)" },
   { key: "趨勢模板", text: true }, { key: "50日上漲/下跌量比", label: "上漲/下跌量比" },
   { key: "相對成交量" },
@@ -976,10 +1024,48 @@ function renderIC() {
   ]);
 }
 
+function renderBacktest() {
+  const b = DATA.beta_backtest;
+  if (!b || !b.ic) return;
+  $("#bt-wrap").hidden = false;
+  const rd = b.regime_days || {};
+  $("#bt-head").textContent = `期間 ${b.period[0]} ~ ${b.period[1]}，${b.days} 個訊號日、${b.stocks} 檔　·　`
+    + `盤勢天數：多頭 ${rd["多頭"] ?? 0}、盤整 ${rd["盤整"] ?? 0}、轉弱 ${rd["轉弱"] ?? 0}　·　產生於 ${String(b.generated_at).slice(0, 10)}`;
+  const v = b.verdict || {};
+  $("#bt-tiles").innerHTML = "";
+  const pct = x => x == null ? "–" : (x > 0 ? "+" : "") + (x * 100).toFixed(2) + "%";
+  [["結論", v["結論"] || "–"],
+   ["條件價差（20日）", `${pct(b.conditional?.["全期"]?.mean)}　t ${b.conditional?.["全期"]?.t ?? "–"}`],
+   ["Top30 純RS 超額", pct(b.top30?.["純RS"]?.["全期"]?.mean)],
+   ["Top30 RS+α 超額", pct(b.top30?.["RS+α60"]?.["全期"]?.mean)],
+   ["高Beta強勢股（20日）", pct(b.high_beta?.["全期"]?.mean)]].forEach(([k, val], i) => {
+    const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", val));
+    if (i === 0) { t.style.gridColumn = "1 / -1"; t.querySelector(".v").style.fontSize = "15px"; }
+    $("#bt-tiles").appendChild(t);
+  });
+  const rows = b.ic.filter(r => r["報酬期間(日)"] === 20).map(r => ({ 因子: r["因子"], 全期: r["全期_mean"], t: r["全期_t"],
+    多頭: r["多頭_mean"], 盤整: r["盤整_mean"], 轉弱: r["轉弱_mean"] }));
+  table($("#bt-ic"), rows, [{ key: "因子", text: true }, { key: "全期", d: 4, sign: true, label: "平均IC（全期）" },
+    { key: "t", sign: true, label: "t值" }, { key: "多頭", d: 4, sign: true }, { key: "盤整", d: 4, sign: true }, { key: "轉弱", d: 4, sign: true }]);
+  const cmp = [];
+  const add = (name, o, note) => cmp.push({ 項目: name, 全期: o?.["全期"]?.mean != null ? o["全期"].mean * 100 : null, t: o?.["全期"]?.t,
+    多頭: o?.["多頭"]?.mean != null ? o["多頭"].mean * 100 : null, 盤整: o?.["盤整"]?.mean != null ? o["盤整"].mean * 100 : null,
+    轉弱: o?.["轉弱"]?.mean != null ? o["轉弱"].mean * 100 : null, 說明: note });
+  add("條件價差：RS前20%內 α高−低", b.conditional, "> 0 代表 α 能在強勢股中再分出好壞");
+  add("高Beta：RS前20%內 Beta>1.5−其餘", b.high_beta, "< 0 代表高 Beta 強勢股之後較易回落");
+  add("Top30 純RS 超額報酬", b.top30?.["純RS"], "每天取前 30 檔，之後 20 日 − 全體平均");
+  add("Top30 RS+α60 超額報酬", b.top30?.["RS+α60"], "RS 50% + α60 50%");
+  add("差額（RS+α − 純RS）", b.top30?.["差額(新−舊)"], `兩組平均重疊 ${b.top30?.["兩組重疊檔數(平均)"] ?? "–"} 檔`);
+  table($("#bt-cmp"), cmp, [{ key: "項目", text: true }, { key: "全期", sign: true, label: "全期(%)" }, { key: "t", sign: true, label: "t值" },
+    { key: "多頭", sign: true, label: "多頭(%)" }, { key: "盤整", sign: true, label: "盤整(%)" }, { key: "轉弱", sign: true, label: "轉弱(%)" },
+    { key: "說明", text: true }]);
+  $("#bt-note").textContent = (v["限制"] || "") + " t 值已做重疊校正（有效樣本 = 天數 ÷ 20），|t| ≥ 2 才算顯著。";
+}
+
 /* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
 const T30 = { data: null, tier: "", init: false, cache: {} };
-const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高"]);
-const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱"]);
+const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高", "α確認", "低Beta強勢"]);
+const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱", "靠Beta撐", "高Beta"]);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
 async function loadTop30(date) {
@@ -1019,7 +1105,9 @@ function renderTop30() {
   const n = d.passed || 1, newN = d.items.filter(x => x["新進榜"]).length;
   $("#t30-tiles").innerHTML = "";
   [["通過檔數", d.passed], ["A 優先研究", d.tiers.A], ["B 觀察", d.tiers.B], ["C 不建議追價", d.tiers.C],
-   ["過熱比例", Math.round(d.overheat / n * 100) + "%"], ["新進榜", d.prev_asof ? newN : "–"], ["行情型態", d.mode]]
+   ["過熱比例", Math.round(d.overheat / n * 100) + "%"], ["新進榜", d.prev_asof ? newN : "–"], ["行情型態", d.mode],
+   ...(d.avg_beta != null ? [["平均 Beta", d.avg_beta.toFixed(2)]] : []),
+   ...(d.regime && d.regime.state ? [["盤勢", d.regime.state]] : [])]
     .forEach(([k, v]) => { const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v ?? "–")); $("#t30-tiles").appendChild(t); });
   $("#t30-hl").innerHTML = "";
   (d.highlights || []).forEach(h => $("#t30-hl").appendChild(el("li", "", h)));
@@ -1039,9 +1127,9 @@ function renderTop30Table() {
   const d = T30.data; if (!d) return;
   const rows = d.items.filter(x => (!T30.tier || x["層級"] === T30.tier) && (!$("#t30-new").checked || x["新進榜"]));
   const tb = $("#t30-table"); tb.innerHTML = "";
-  const cols = ["#", "股票", "細族群", "層級", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "籌碼", "標籤", "上榜"];
+  const cols = ["#", "股票", "細族群", "層級", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "Beta", "α60評等", "籌碼", "標籤", "上榜"];
   const thead = el("thead"), hr = el("tr");
-  cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 9 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
+  cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 11 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
   thead.appendChild(hr); tb.appendChild(thead);
   const body = el("tbody");
   if (!rows.length) { const r = el("tr"); r.appendChild(el("td", "txt muted", "沒有符合的資料")); body.appendChild(r); }
@@ -1052,7 +1140,7 @@ function renderTop30Table() {
     r.append(el("td", "num", x["排名"]), el("td", "txt", `${x["代碼"]} ${x["股票名稱"]}`), el("td", "txt", x["細族群"] || ""));
     const tt = el("td", "txt"); tt.appendChild(el("span", "tier " + x["層級"], x["層級"])); r.appendChild(tt);
     r.append(num(x["RS評等"], 0), num(x["RS線斜率(%/日)"], 2), num(x["RS線R²"], 2), num(x["20日RS(%)"], 1, true),
-             num(x["品質分數"], 1), el("td", "txt", x["籌碼"] || ""));
+             num(x["品質分數"], 1), num(x["Beta"], 2), num(x["α60評等"], 0), el("td", "txt", x["籌碼"] || ""));
     const tg = el("td", "tagcell");
     if (x["新進榜"]) tg.appendChild(el("span", "tag new", "NEW"));
     (x["標籤"] || []).forEach(s => tg.appendChild(el("span", "tag" + (T30_GOOD.has(s) ? " good" : T30_WARN.has(s) ? " warn" : ""), s)));
@@ -1261,6 +1349,7 @@ function wRow(code) {
   const qd = wQuad(r);
   return { code, r, 名稱: r["股票名稱"], 收盤價: r["收盤價"], RS評等: r["RS評等"], "20日RS評等": r["20日RS評等"], "60日RS評等": r["60日RS評等"],
     "5日RS(%)": r["5日RS(%)"], "20日RS(%)": r["20日RS(%)"], 象限: qd.q, 動能差: qd.m, 判讀: qd.txt,
+    Beta: r["Beta"] ?? null, α60評等: r["α60評等"] ?? null,
     族群: g ? g["族群"] : "", 族群類型: g ? g["類型"] : "", 族群強度: g ? g["成分股RS評等中位數"] : null,
     "族群20日RS(%)": g ? g["20日RS(%)"] : null, 族群PR: rk.pr ?? null, 族群名次: rk.rank, 族群數: rk.n,
     族群象限: rr["象限"] || "", 族群判讀: rr["判讀"] || "" };
@@ -1402,7 +1491,10 @@ function renderWatch() {
   wInit();
   renderLists();
   const rows = W.list.map(wRow);
-  $("#w-count").textContent = `「${wCur().name}」共 ${W.list.length} 檔　·　資料日 ${DATA.asof}`;
+  const _bs = rows.map(x => x.Beta).filter(v => typeof v === "number");
+  const _ab = _bs.length ? _bs.reduce((a, b) => a + b, 0) / _bs.length : null;
+  $("#w-count").textContent = `「${wCur().name}」共 ${W.list.length} 檔`
+    + (_ab != null ? `　·　平均 Beta ${_ab.toFixed(2)}（大盤跌 5% 約 ${(-5 * _ab).toFixed(1)}%）` : "") + `　·　資料日 ${DATA.asof}`;
   const tb = $("#w-table"); tb.innerHTML = "";
   if (!rows.length) {
     tb.innerHTML = "<tbody><tr><td class='txt muted'>清單是空的。在上方輸入代號或名稱，從下拉選單點選加入；也可以一次貼上多檔，用逗號或空白分隔後按 Enter。</td></tr></tbody>";
@@ -1410,7 +1502,8 @@ function renderWatch() {
   }
   const cols = [
     ["名稱", "股票", "txt"], ["RS評等", "個股強度"], ["動能差", "20/60日評等"],
-    ["5日RS(%)", "5日RS%", "sign"], ["20日RS(%)", "20日RS%", "sign"], ["象限", "個股象限", "txt"], ["判讀", "判讀", "txt"],
+    ["5日RS(%)", "5日RS%", "sign"], ["20日RS(%)", "20日RS%", "sign"], ["Beta", "Beta"], ["α60評等", "α60評等"],
+    ["象限", "個股象限", "txt"], ["判讀", "判讀", "txt"],
     ["族群", "所在族群", "txt"], ["族群強度", "族群強度"], ["族群PR", "族群排名(PR)"],
     ["族群象限", "族群象限", "txt"], ["", "", "txt"],
   ];
@@ -1447,7 +1540,7 @@ function renderWatch() {
     nm.append(el("b", "", x.code), " " + (x.名稱 || ""));
     tr.append(nm, num(x.RS評等, 0),
               el("td", "num", `${x["20日RS評等"] ?? "–"} / ${x["60日RS評等"] ?? "–"}`),
-              num(x["5日RS(%)"], 1, true), num(x["20日RS(%)"], 1, true));
+              num(x["5日RS(%)"], 1, true), num(x["20日RS(%)"], 1, true), num(x.Beta, 2), num(x.α60評等, 0));
     const qd = el("td", "txt"); if (x.象限) qd.appendChild(el("span", "quad " + x.象限, x.象限)); else qd.textContent = "–";
     tr.append(qd, el("td", "why", x.判讀));
     const gd = el("td", "grp", x.族群 || "–"); if (x.族群類型 && x.族群類型 !== "細族群") gd.appendChild(el("span", "muted", `（${x.族群類型}）`));
@@ -1573,11 +1666,11 @@ async function boot() {
     if (!a) return;
     $("#s-sub").value = a.textContent; renderStocks();
   });
-  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high", "#s-obv", "#s-trend", "#s-qual"].forEach(s =>
+  ["#s-q", "#s-sub", "#s-market", "#s-rs", "#s-star", "#s-high", "#s-obv", "#s-trend", "#s-qual", "#s-preset"].forEach(s =>
     $(s).addEventListener("input", renderStocks));
 
   initAnim();
-  drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC();
+  drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC(); renderRegime(); renderBacktest();
   renderLink();
   if (new URLSearchParams(location.search).get("w")) renderWatch();
   addEventListener("resize", () => drawRRG());
