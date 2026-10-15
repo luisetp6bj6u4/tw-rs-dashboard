@@ -406,6 +406,24 @@
       <div class="tablewrap"><table id="bt-cmp"></table></div>
       <p class="note muted" id="bt-note"></p>
     </section>
+    <section id="t30bt-wrap" hidden>
+      <h2>⚡ Top30 規則回測與補充排序</h2>
+      <p class="note" id="t30bt-head"></p>
+      <ul class="note" id="t30bt-verdict"></ul>
+      <h3 class="subhead">規則逐層：之後 20 日超額報酬（%）</h3>
+      <div class="tablewrap"><table id="t30bt-layers"></table></div>
+      <h3 class="subhead">投組模擬（等權、扣交易成本）</h3>
+      <div class="tablewrap"><table id="t30bt-sim"></table></div>
+      <h3 class="subhead">A／B／C 分層（有法人資料的期間）</h3>
+      <div class="tablewrap"><table id="t30bt-tiers"></table></div>
+      <h3 class="subhead">RS 十等分：之後 20 日 − 全體平均（%）</h3>
+      <div class="tablewrap"><table id="t30bt-dec"></table></div>
+      <h3 class="subhead">補充排序因子（篩選池內：RS≥80、斜率&gt;0、R²≥0.7、成交值≥3億）</h3>
+      <div class="tablewrap"><table id="t30bt-sup"></table></div>
+      <h3 class="subhead">樣本外驗證（前半段挑因子，後半段比較）</h3>
+      <div class="tablewrap"><table id="t30bt-val"></table></div>
+      <p class="note muted" id="t30bt-note"></p>
+    </section>
   </section>
 
   <section id="tab-top30" hidden>
@@ -1067,6 +1085,61 @@ function renderBacktest() {
   $("#bt-note").textContent = (v["限制"] || "") + " t 值已做重疊校正（有效樣本 = 天數 ÷ 20），|t| ≥ 2 才算顯著。";
 }
 
+function renderT30Backtest() {
+  const b = DATA.top30_backtest;
+  if (!b || !b.layers) return;
+  $("#t30bt-wrap").hidden = false;
+  const rd = b.regime_days || {}, dt = b.data || {};
+  $("#t30bt-head").textContent = `期間 ${b.period[0]} ~ ${b.period[1]}，${b.days} 個訊號日、${b.stocks} 檔　·　`
+    + `多頭 ${rd["多頭"] ?? 0}／盤整 ${rd["盤整"] ?? 0}／轉弱 ${rd["轉弱"] ?? 0} 天　·　資料：籌碼${dt["籌碼"] ? "✔" : "✗"} 月營收${dt["月營收"] ? "✔" : "✗"} 品質${dt["品質"] ? "✔" : "✗"}　·　產生於 ${String(b.generated_at).slice(0, 10)}`;
+  const ul = $("#t30bt-verdict"); ul.innerHTML = "";
+  ((b.verdict || {})["重點"] || []).forEach(t => ul.appendChild(el("li", "", t)));
+  const P = o => o?.mean != null ? o.mean * 100 : null;
+  const rows = [];
+  (b.layers || []).forEach(l => ["對加權", "對全體等權"].forEach(k => rows.push({
+    層: l["層"], 比較: k, 檔數: l["平均檔數"], 全期: P(l[k]["全期"]), t: l[k]["全期"].t, 勝率: l[k]["全期"].pos,
+    多頭: P(l[k]["多頭"]), 盤整: P(l[k]["盤整"]), 轉弱: P(l[k]["轉弱"]) })));
+  const u = b.universe_vs_taiex;
+  if (u) rows.push({ 層: "參考：全體等權", 比較: "對加權", 全期: P(u["全期"]), t: u["全期"].t, 勝率: u["全期"].pos,
+    多頭: P(u["多頭"]), 盤整: P(u["盤整"]), 轉弱: P(u["轉弱"]) });
+  table($("#t30bt-layers"), rows, [{ key: "層", text: true }, { key: "比較", text: true }, { key: "檔數", d: 1 },
+    { key: "全期", sign: true, label: "全期(%)" }, { key: "t", sign: true, label: "t值" }, { key: "勝率", d: 0, label: "勝率%" },
+    { key: "多頭", sign: true, label: "多頭(%)" }, { key: "盤整", sign: true, label: "盤整(%)" }, { key: "轉弱", sign: true, label: "轉弱(%)" }]);
+  const sim = (b.simulation || []).map(s => ({ ...s, 組合: s["組合"] === "L0" ? "純RS前30" : "現行Top30", 轉弱空手: s["轉弱空手"] ? "✔" : "" }));
+  table($("#t30bt-sim"), sim, [{ key: "組合", text: true }, { key: "換股週期(日)", d: 0, label: "換股(日)" }, { key: "轉弱空手", text: true },
+    { key: "年化報酬%", sign: true, d: 1 }, { key: "加權年化%", sign: true, d: 1 }, { key: "年化超額%", sign: true, d: 1 },
+    { key: "夏普", d: 2 }, { key: "最大回撤%", d: 1 }, { key: "加權最大回撤%", d: 1 }, { key: "勝過加權比例%", d: 0, label: "勝過加權%" },
+    { key: "平均換手%", d: 0, label: "換手%" }]);
+  const tr = [];
+  if (b.tiers) ["A", "B", "C"].forEach(k => { const x = b.tiers[k]; if (x) tr.push({ 層級: k, 檔數: x["每日平均檔數"],
+    對加權: P(x["對加權"]), t1: x["對加權"].t, 勝率: x["對加權"].pos, 對等權: P(x["對全體等權"]), t2: x["對全體等權"].t }); });
+  table($("#t30bt-tiers"), tr, [{ key: "層級", text: true }, { key: "檔數", d: 1, label: "每日檔數" },
+    { key: "對加權", sign: true, label: "對加權(%)" }, { key: "t1", sign: true, label: "t值" }, { key: "勝率", d: 0, label: "勝率%" },
+    { key: "對等權", sign: true, label: "對全體等權(%)" }, { key: "t2", sign: true, label: "t值" }]);
+  const dec = (b.deciles || {})["十等分(D1最弱→D10最強，%)"] || [];
+  const drow = {}; dec.forEach((v, i) => drow["D" + (i + 1)] = v);
+  drow["最強2%"] = P(b.deciles?.["最強2%"]);
+  table($("#t30bt-dec"), dec.length ? [drow] : [], [...dec.map((_, i) => ({ key: "D" + (i + 1), sign: true })), { key: "最強2%", sign: true }]);
+  const chosen = new Set(b.chosen || []);
+  const sup = (b.supplements || []).map(x => ({ 因子: (chosen.has(x["因子"]) ? "✔ " : "") + x["因子"], 涵蓋: x["資料涵蓋%"],
+    IC: x["池內IC"]?.mean, t: x["池內IC"]?.t, 前半: x["前半IC"]?.mean, 前半t: x["前半IC"]?.t, 後半: x["後半IC"]?.mean, 後半t: x["後半IC"]?.t,
+    價差: P(x["前1/3−後1/3"]?.["全期"]), 多頭: P(x["前1/3−後1/3"]?.["多頭"]), 轉弱: P(x["前1/3−後1/3"]?.["轉弱"]) }));
+  table($("#t30bt-sup"), sup, [{ key: "因子", text: true }, { key: "涵蓋", d: 0, label: "涵蓋%" },
+    { key: "IC", d: 3, sign: true, label: "池內IC" }, { key: "t", sign: true, label: "t值" },
+    { key: "前半", d: 3, sign: true, label: "前半IC" }, { key: "前半t", sign: true, label: "t" },
+    { key: "後半", d: 3, sign: true, label: "後半IC" }, { key: "後半t", sign: true, label: "t" },
+    { key: "價差", sign: true, label: "前1/3−後1/3(%)" }, { key: "多頭", sign: true, label: "多頭(%)" }, { key: "轉弱", sign: true, label: "轉弱(%)" }]);
+  const v = b.validation || {}, vr = [];
+  Object.keys(v).filter(k => k.startsWith("前")).forEach(k => { if (!v[k] || !v[k]["對加權"]) return;
+    const [n, lab] = k.split("_"); vr.push({ 名次: n, 排序: lab, 對加權: P(v[k]["對加權"]["全期"]), t1: v[k]["對加權"]["全期"].t,
+      對等權: P(v[k]["對全體等權"]["全期"]), t2: v[k]["對全體等權"]["全期"].t }); });
+  table($("#t30bt-val"), vr, [{ key: "名次", text: true }, { key: "排序", text: true }, { key: "對加權", sign: true, label: "對加權(%)" },
+    { key: "t1", sign: true, label: "t值" }, { key: "對等權", sign: true, label: "對全體等權(%)" }, { key: "t2", sign: true, label: "t值" }]);
+  $("#t30bt-note").textContent = `篩選池平均 ${b.pool_size ?? "–"} 檔。前半段挑出：${(b.chosen || []).join("、") || "無"}`
+    + `（驗證期 ${v["驗證期間"] ? v["驗證期間"].join(" ~ ") : "–"}）。` + ((b.verdict || {})["限制"] || "")
+    + " t 值已做重疊校正，|t| ≥ 2 才算顯著；IC 0.03 以上屬實務可用。";
+}
+
 /* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
 const T30 = { data: null, tier: "", init: false, cache: {} };
 const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高", "α確認", "低Beta強勢"]);
@@ -1675,7 +1748,7 @@ async function boot() {
     $(s).addEventListener("input", renderStocks));
 
   initAnim();
-  drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC(); renderRegime(); renderBacktest();
+  drawRRG(); renderRRGTable(); renderGroups(); renderStocks(); renderIC(); renderRegime(); renderBacktest(); renderT30Backtest();
   renderLink();
   if (new URLSearchParams(location.search).get("w")) renderWatch();
   addEventListener("resize", () => drawRRG());
