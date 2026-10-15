@@ -439,6 +439,19 @@
     </div>
     <p class="note" id="t30-head">載入中…</p>
     <div class="tiles" id="t30-tiles"></div>
+    <section id="t30-env-wrap" hidden>
+      <h2>動能環境 <span class="muted" style="font-size:13px;font-weight:400">最近追強勢股有沒有用？哪些條件比較有效？</span></h2>
+      <div class="card">
+        <p id="t30-env-head" style="margin:0 0 6px"></p>
+        <div id="t30-env-spark"></div>
+        <ul class="t30-hl" id="t30-env-adv"></ul>
+        <details><summary class="muted">各條件近期表現（篩選池內，之後 5 日相對池平均）</summary>
+          <div class="tablewrap"><table id="t30-env-table"></table></div>
+          <p class="note muted">近40日 = 最近 40 個訊號日平均；長期 = 2024-04～2026-06 回測平均；變化 = 近40日 − 長期。
+            篩選池 = Top30 的 RS／斜率／R²／成交值條件（不含品質）。樣本小，只看方向；指標落後 5 個交易日。</p>
+        </details>
+      </div>
+    </section>
     <h2>今日重點</h2>
     <div class="card"><ul class="t30-hl" id="t30-hl"></ul></div>
     <h2>優先研究（A 層）</h2>
@@ -1187,10 +1200,12 @@ function renderTop30() {
   [["通過檔數", d.passed], ["A 優先研究", d.tiers.A], ["B 觀察", d.tiers.B], ["C 不建議追價", d.tiers.C],
    ["過熱比例", Math.round(d.overheat / n * 100) + "%"], ["新進榜", d.prev_asof ? newN : "–"], ["行情型態", d.mode],
    ...(d.avg_beta != null ? [["平均 Beta", d.avg_beta.toFixed(2)]] : []),
-   ...(d.regime && d.regime.state ? [["盤勢", d.regime.state]] : [])]
+   ...(d.regime && d.regime.state ? [["盤勢", d.regime.state]] : []),
+   ...(d.momentum_env && d.momentum_env.state ? [["動能環境", d.momentum_env.state]] : [])]
     .forEach(([k, v]) => { const t = el("div", "tile"); t.append(el("div", "k", k), el("div", "v", v ?? "–")); $("#t30-tiles").appendChild(t); });
   $("#t30-hl").innerHTML = "";
   (d.highlights || []).forEach(h => $("#t30-hl").appendChild(el("li", "", h)));
+  renderMomentumEnv(d.momentum_env);
   $("#t30-picks").innerHTML = "";
   if (!d.picks.length) $("#t30-picks").appendChild(el("p", "note", "今天沒有符合 A 層條件的股票。"));
   d.picks.forEach(p => {
@@ -1201,6 +1216,41 @@ function renderTop30() {
   $("#t30-out").textContent = !d.prev_asof ? "（沒有前一日資料可比較）" :
     d.out.length ? d.out.map(x => `${x["代碼"]} ${x["股票名稱"]}`).join("、") : "無";
   renderTop30Table();
+}
+
+function renderMomentumEnv(e) {
+  const wrap = $("#t30-env-wrap");
+  if (!e || !e.state) { wrap.hidden = true; return; }
+  wrap.hidden = false;
+  const pc = x => x == null ? "–" : (x > 0 ? "+" : "") + (x * 100).toFixed(1) + "%";
+  const color = e.state === "順風" ? "var(--up)" : e.state === "逆風" ? "var(--down)" : "var(--text-muted)";
+  const h = $("#t30-env-head"); h.innerHTML = "";
+  const badge = el("b", "", e.state); badge.style.color = color; badge.style.fontSize = "18px";
+  h.append(badge, el("span", "muted", `　近 20 日 RS IC ${e.rs_ic_20 != null ? (e.rs_ic_20 > 0 ? "+" : "") + e.rs_ic_20.toFixed(3) : "–"}`
+    + `（長期 ${e.long && e.long.rs_ic != null ? e.long.rs_ic.toFixed(3) : "–"}）　最強10% ${pc(e.top10_20)}　最弱10% ${pc(e.bot10_20)}　篩選池 ${pc(e.pool_20)}`
+    + (e.streak ? `　已連續 ${e.streak} 日` : "") + `　·　資料到 ${e.asof_signal}`));
+  // 近 20 日 RS IC 走勢（> +0.03 順風、< −0.03 逆風）
+  const s = (e.series || []).filter(p => p.ic != null), W = 640, Hh = 90, pad = 4;
+  const sp = $("#t30-env-spark"); sp.innerHTML = "";
+  if (s.length > 5) {
+    const lo = Math.min(-0.12, ...s.map(p => p.ic)), hi = Math.max(0.12, ...s.map(p => p.ic));
+    const X = i => pad + i / (s.length - 1) * (W - 2 * pad), Y = v => pad + (hi - v) / (hi - lo) * (Hh - 2 * pad);
+    const pts = s.map((p, i) => `${X(i).toFixed(1)},${Y(p.ic).toFixed(1)}`).join(" ");
+    sp.innerHTML = `<svg viewBox="0 0 ${W} ${Hh}" width="100%" height="${Hh}" preserveAspectRatio="none" role="img" aria-label="近 20 日 RS IC 走勢">
+      <rect x="0" y="${Y(0.03)}" width="${W}" height="${Y(-0.03) - Y(0.03)}" fill="var(--line)" opacity=".35"/>
+      <line x1="0" x2="${W}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 3"/>
+      <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke"/>
+      <title>${s[0].d} ~ ${s[s.length - 1].d}：近 20 日 RS IC（灰帶 = 中性 ±0.03）</title></svg>
+      <div class="muted" style="font-size:11px;display:flex;justify-content:space-between"><span>${s[0].d}</span><span>灰帶 = 中性（±0.03），上方順風、下方逆風</span><span>${s[s.length - 1].d}</span></div>`;
+  }
+  const ul = $("#t30-env-adv"); ul.innerHTML = "";
+  (e.advice || []).forEach(t => ul.appendChild(el("li", "", t)));
+  const rows = (e.conds || []).map(c => ({ 條件: c["條件"], 說明: c["說明"],
+    近40日: c["近40日"] != null ? c["近40日"] * 100 : null, 長期: c["長期"] != null ? c["長期"] * 100 : null,
+    變化: c["變化"] != null ? c["變化"] * 100 : null, 樣本: c["樣本檔次"] }));
+  table($("#t30-env-table"), rows, [{ key: "條件", text: true }, { key: "近40日", sign: true, label: "近40日(%)" },
+    { key: "長期", sign: true, label: "長期(%)" }, { key: "變化", sign: true, label: "變化(pp)" }, { key: "樣本", d: 0, label: "樣本檔次" },
+    { key: "說明", text: true }]);
 }
 
 function renderTop30Table() {
