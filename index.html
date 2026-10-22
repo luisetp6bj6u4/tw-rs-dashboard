@@ -464,7 +464,7 @@
     <p class="note muted">
       判讀規則：斜率 &gt; 3%/日 或 20日RS &gt; 80% 為過熱；60日RS評等 &lt; 60 為剛轉強；5日RS &lt; 0 且收盤強弱度 &lt; 30 為拉回中；
       20日法人集中度 ≥ 3% 或投信 20 日買超 ≥ 5 天為機構支撐；品質分數 ≥ 70 或 ◆ 為品質佳，剛好 60 代表 ROE &lt; 5% 被壓上限。
-      營收加速＝營收年增加速 &gt; 0 且近3月營收年增 &gt; 0；投信加碼＝20日投信集中度 ≥ 0.5%；爆量＝近 20 日日均成交值 ≥ 半年平均 2 倍
+      營收加速＝營收年增加速 &gt; 0 且近3月營收年增 &gt; 0；投信加碼＝20日投信集中度 ≥ 0.5%；爆量＝近 20 日日均成交值 ≥ 半年平均 2 倍；跌停／當日重挫／漲停＝當日漲跌 ≤ -9.5%／-5%～-9.5%／≥ +9.5%（RS 線反應較慢，另外標出）
       （這三個標籤只供參考、不影響分層，依據見「因子檢定」分頁的 Top30 規則回測）。
       依收盤資料做事實篩選與規則判讀，不構成投資建議。
     </p>
@@ -1158,7 +1158,7 @@ function renderT30Backtest() {
 /* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
 const T30 = { data: null, tier: "", init: false, cache: {} };
 const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高", "α確認", "低Beta強勢", "營收加速", "投信加碼"]);
-const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱", "爆量"]);
+const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱", "爆量", "跌停", "當日重挫"]);
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
 async function loadTop30(date) {
@@ -1257,9 +1257,9 @@ function renderTop30Table() {
   const d = T30.data; if (!d) return;
   const rows = d.items.filter(x => (!T30.tier || x["層級"] === T30.tier) && (!$("#t30-new").checked || x["新進榜"]));
   const tb = $("#t30-table"); tb.innerHTML = "";
-  const cols = ["#", "股票", "細族群", "層級", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "Beta", "α60評等", "籌碼", "標籤", "上榜"];
+  const cols = ["#", "股票", "細族群", "層級", "當日%", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "Beta", "α60評等", "籌碼", "標籤", "上榜"];
   const thead = el("thead"), hr = el("tr");
-  cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 11 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
+  cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 12 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
   thead.appendChild(hr); tb.appendChild(thead);
   const body = el("tbody");
   if (!rows.length) { const r = el("tr"); r.appendChild(el("td", "txt muted", "沒有符合的資料")); body.appendChild(r); }
@@ -1269,7 +1269,7 @@ function renderTop30Table() {
     const r = el("tr", "t30-row");
     r.append(el("td", "num", x["排名"]), el("td", "txt", `${x["代碼"]} ${x["股票名稱"]}`), el("td", "txt", x["細族群"] || ""));
     const tt = el("td", "txt"); tt.appendChild(el("span", "tier " + x["層級"], x["層級"])); r.appendChild(tt);
-    r.append(num(x["RS評等"], 0), num(x["RS線斜率(%/日)"], 2), num(x["RS線R²"], 2), num(x["20日RS(%)"], 1, true),
+    r.append(num(x["當日漲跌(%)"], 1, true), num(x["RS評等"], 0), num(x["RS線斜率(%/日)"], 2), num(x["RS線R²"], 2), num(x["20日RS(%)"], 1, true),
              num(x["品質分數"], 1), num(x["Beta"], 2), num(x["α60評等"], 0), el("td", "txt", x["籌碼"] || ""));
     const tg = el("td", "tagcell");
     if (x["新進榜"]) tg.appendChild(el("span", "tag new", "NEW"));
