@@ -429,23 +429,22 @@
   <section id="tab-top30" hidden>
     <div class="controls">
       <label class="muted">資料日 <select id="t30-date"></select></label>
-      <span class="chips" id="t30-tier" role="group" aria-label="層級">
+      <span class="chips" id="t30-tier" role="group" aria-label="篩選">
         <button type="button" data-t="" aria-pressed="true">全部</button>
-        <button type="button" data-t="A" aria-pressed="false">A 優先研究</button>
-        <button type="button" data-t="B" aria-pressed="false">B 觀察</button>
-        <button type="button" data-t="C" aria-pressed="false">C 不建議追價</button>
+        <button type="button" data-t="rev" aria-pressed="false">營收加速</button>
+        <button type="button" data-t="other" aria-pressed="false">其他</button>
       </span>
       <label class="muted"><input id="t30-new" type="checkbox"> 只看新進榜</label>
     </div>
     <p class="note" id="t30-head">載入中…</p>
     <div class="tiles" id="t30-tiles"></div>
     <section id="t30-env-wrap" hidden>
-      <h2>動能環境 <span class="muted" style="font-size:13px;font-weight:400">最近追強勢股有沒有用？哪些條件比較有效？</span></h2>
+      <h2>動能環境 <span class="muted" style="font-size:13px;font-weight:400">過去 20 日追強勢股有沒有用（只描述，不預測）</span></h2>
       <div class="card">
         <p id="t30-env-head" style="margin:0 0 6px"></p>
         <div id="t30-env-spark"></div>
         <ul class="t30-hl" id="t30-env-adv"></ul>
-        <details><summary class="muted">各條件近期表現（篩選池內，之後 5 日相對池平均）</summary>
+        <details><summary class="muted">各條件過去 40 日表現（描述用；回測顯示不能預測之後 40 日）</summary>
           <div class="tablewrap"><table id="t30-env-table"></table></div>
           <p class="note muted">近40日 = 最近 40 個訊號日平均；長期 = 2024-04～2026-06 回測平均；變化 = 近40日 − 長期。
             篩選池 = Top30 的 RS／斜率／R²／成交值條件（不含品質）。樣本小，只看方向；指標落後 5 個交易日。</p>
@@ -454,18 +453,20 @@
     </section>
     <h2>今日重點</h2>
     <div class="card"><ul class="t30-hl" id="t30-hl"></ul></div>
-    <h2>優先研究（A 層）</h2>
+    <h2>排序前 5（排除跌停、當日重挫）</h2>
     <div class="t30-picks" id="t30-picks"></div>
-    <h2>Top30 分層總表</h2>
-    <p class="note muted" style="margin:0 0 8px">點任一列展開判讀理由。層級：A 趨勢健康＋品質佳＋有籌碼支撐；B 趨勢穩但基本面或籌碼普通、拉回中或品質待補；C 過熱噴出、剛轉強、獲利偏弱或無法人參與。</p>
+    <h2>Top30 總表</h2>
+    <p class="note muted" style="margin:0 0 8px">點任一列展開判讀理由。排序（2026-11-03 起）：先「營收加速」，再依綜合分（RS 40%、R² 30%、品質 30%）。
+      原本的 A／B／C 分層在 2019～2024 樣本外檢驗中沒有勝過篩選池平均，已取消；這個新排序本身也還在實盤驗證中。</p>
     <div class="tablewrap"><table id="t30-table"></table></div>
     <h2>跌出榜</h2>
     <p class="note" id="t30-out"></p>
     <p class="note muted">
-      判讀規則：斜率 &gt; 3%/日 或 20日RS &gt; 80% 為過熱；60日RS評等 &lt; 60 為剛轉強；5日RS &lt; 0 且收盤強弱度 &lt; 30 為拉回中；
-      20日法人集中度 ≥ 3% 或投信 20 日買超 ≥ 5 天為機構支撐；品質分數 ≥ 70 或 ◆ 為品質佳，剛好 60 代表 ROE &lt; 5% 被壓上限。
-      營收加速＝營收年增加速 &gt; 0 且近3月營收年增 &gt; 0；投信加碼＝20日投信集中度 ≥ 0.5%；爆量＝近 20 日日均成交值 ≥ 半年平均 2 倍；跌停／當日重挫／漲停＝當日漲跌 ≤ -9.5%／-5%～-9.5%／≥ +9.5%（RS 線反應較慢，另外標出）
-      （這三個標籤只供參考、不影響分層，依據見「因子檢定」分頁的 Top30 規則回測）。
+      標籤分類（依 2019-01～2024-04 樣本外檢驗）：綠色＝營收加速、α確認（方向一致但尚未統計顯著）；橘色＝跌停、當日重挫（當日事實）；
+      其餘都是描述性標籤，不代表好壞——例如「過熱」在樣本外反而表現較好，「爆量」「投信加碼」「機構支撐」沒有效果。
+      定義：過熱＝斜率 &gt; 3%/日 或 20日RS &gt; 80%；剛轉強＝60日RS評等 &lt; 60；拉回中＝5日RS &lt; 0 且收盤強弱度 &lt; 30；
+      機構支撐＝20日法人集中度 ≥ 3% 或投信 20 日買超 ≥ 5 天；品質佳＝品質 ≥ 70；營收加速＝營收年增加速 &gt; 0 且近3月營收年增 &gt; 0；
+      投信加碼＝20日投信集中度 ≥ 0.5%；爆量＝近 20 日日均成交值 ≥ 半年平均 2 倍；跌停／當日重挫／漲停＝當日漲跌 ≤ -9.5%／-5%～-9.5%／≥ +9.5%。
       依收盤資料做事實篩選與規則判讀，不構成投資建議。
     </p>
   </section>
@@ -1157,8 +1158,9 @@ function renderT30Backtest() {
 
 /* ---------- ⚡ 台股動能 Top30 每日分層分析（data/top30.json，由盤後排程產生）---------- */
 const T30 = { data: null, tier: "", init: false, cache: {} };
-const T30_GOOD = new Set(["機構支撐", "品質佳", "RS新高", "α確認", "低Beta強勢", "營收加速", "投信加碼"]);
-const T30_WARN = new Set(["過熱", "剛轉強", "拉回中", "無法人", "外資投信背離", "獲利偏弱", "爆量", "跌停", "當日重挫"]);
+const T30_GOOD = new Set(["營收加速", "α確認"]);          // v2：只保留樣本外方向一致的標籤
+const T30_WARN = new Set(["跌停", "當日重挫"]);             // 當日事實
+const t30Rev = x => x["營收加速優先"] ?? (x["標籤"] || []).includes("營收加速");
 const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
 
 async function loadTop30(date) {
@@ -1197,7 +1199,9 @@ function renderTop30() {
     `　·　條件：${d.rules}；通過 ${d.passed} 檔。`;
   const n = d.passed || 1, newN = d.items.filter(x => x["新進榜"]).length;
   $("#t30-tiles").innerHTML = "";
-  [["通過檔數", d.passed], ["A 優先研究", d.tiers.A], ["B 觀察", d.tiers.B], ["C 不建議追價", d.tiers.C],
+  [["通過檔數", d.passed],
+   ...(d.tiers ? [["A／B／C（舊）", `${d.tiers.A}／${d.tiers.B}／${d.tiers.C}`]]
+               : [["營收加速", d.items.filter(t30Rev).length], ["其他", d.items.filter(x => !t30Rev(x)).length]]),
    ["過熱比例", Math.round(d.overheat / n * 100) + "%"], ["新進榜", d.prev_asof ? newN : "–"], ["行情型態", d.mode],
    ...(d.avg_beta != null ? [["平均 Beta", d.avg_beta.toFixed(2)]] : []),
    ...(d.regime && d.regime.state ? [["盤勢", d.regime.state]] : []),
@@ -1255,9 +1259,9 @@ function renderMomentumEnv(e) {
 
 function renderTop30Table() {
   const d = T30.data; if (!d) return;
-  const rows = d.items.filter(x => (!T30.tier || x["層級"] === T30.tier) && (!$("#t30-new").checked || x["新進榜"]));
+  const rows = d.items.filter(x => (!T30.tier || (T30.tier === "rev") === !!t30Rev(x)) && (!$("#t30-new").checked || x["新進榜"]));
   const tb = $("#t30-table"); tb.innerHTML = "";
-  const cols = ["#", "股票", "細族群", "層級", "當日%", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "Beta", "α60評等", "籌碼", "標籤", "上榜"];
+  const cols = ["#", "股票", "細族群", "營收加速", "當日%", "RS評等", "斜率%/日", "R²", "20日RS%", "品質", "Beta", "α60評等", "籌碼", "標籤", "上榜"];
   const thead = el("thead"), hr = el("tr");
   cols.forEach((c, i) => { const th = el("th", i === 1 || i === 2 || i >= 12 ? "txt" : "", c); th.style.cursor = "default"; hr.appendChild(th); });
   thead.appendChild(hr); tb.appendChild(thead);
@@ -1268,7 +1272,10 @@ function renderTop30Table() {
   rows.forEach(x => {
     const r = el("tr", "t30-row");
     r.append(el("td", "num", x["排名"]), el("td", "txt", `${x["代碼"]} ${x["股票名稱"]}`), el("td", "txt", x["細族群"] || ""));
-    const tt = el("td", "txt"); tt.appendChild(el("span", "tier " + x["層級"], x["層級"])); r.appendChild(tt);
+    const tt = el("td", "txt");
+    if (x["層級"]) tt.appendChild(el("span", "tier " + x["層級"], x["層級"]));      // 舊日期資料
+    else if (t30Rev(x)) tt.appendChild(el("span", "tag good", "✓"));
+    r.appendChild(tt);
     r.append(num(x["當日漲跌(%)"], 1, true), num(x["RS評等"], 0), num(x["RS線斜率(%/日)"], 2), num(x["RS線R²"], 2), num(x["20日RS(%)"], 1, true),
              num(x["品質分數"], 1), num(x["Beta"], 2), num(x["α60評等"], 0), el("td", "txt", x["籌碼"] || ""));
     const tg = el("td", "tagcell");
